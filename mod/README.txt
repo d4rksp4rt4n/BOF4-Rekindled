@@ -1,5 +1,5 @@
-Breath of Fire IV - English Uncut 1.1 (GOG version)
-=====================================================
+Breath of Fire IV - English Uncut 1.2 (GOG; Steam experimental)
+============================================================
 
 Run BOF4_Uncut_EN.exe, check the game folder, tick the options you want and press Apply.
 Options:
@@ -25,10 +25,21 @@ Options:
     port draws on top of each other, become element icons as in the PS1 hack (red = weak,
     blue = strong).
   - Better Descriptions: item, equipment and master descriptions show hidden effects
+  - 60 fps (EXPERIMENTAL, off by default): the game runs at 30 fps. This draws an in-between
+    frame for each one, so the camera and characters move smoothly (bof4_reverb.dll). Menus and
+    text that jump stay as they are. Scroll Lock switches it off and on while playing.
+    If something flickers, jumps or tears only with it on, please report it. To capture it, add
+    to BOF4_reverb.ini:
+        [fps60]
+        dump=1         ; Pause saves the last second of frames to fps60_dump\ (~6 MB per frame)
+    press Pause right after the glitch and attach the fps60_dump folder (zipped) to the report.
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
-The Steam version is not supported: the installer recognises only the GOG files and leaves
-anything else untouched.
+Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected
+(encrypted), so the installer leaves it untouched and adds version.dll and BOF4_Uncut_EN.mem
+instead: version.dll applies the same changes in memory when the game starts and writes the
+result to BOF4_Uncut_EN.log. Please report how it went (with that log) on the GitHub page.
+Other versions are refused: the installer recognises only the GOG and Steam files.
 
 Still being tested: not every song's loop has been heard yet. (The Dengeki Store's signs stay Japanese:
 they are part of its textures, and the store never had an English release.) Please report
@@ -45,7 +56,7 @@ everything; originals are kept in BOF4_Uncut_EN_backup.
 The installer checks every file before changing anything. It refuses to run on files that
 aren't the original English GOG ones, e.g. if the German patch's DAT files are installed.
 
-Files changed: BOF4.exe, bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
+Files changed: BOF4.exe (Steam: version.dll and BOF4_Uncut_EN.mem added instead), bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
 (store), INIT, AB000_00, BTLEND (Identify), AB000_00, CAMP, COMMU03, MASTER, MSHOP, SGAMEN, SHOP
 (descriptions).
 

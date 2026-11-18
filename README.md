@@ -13,6 +13,7 @@ option can be switched on or off, and "Restore original files" undoes everything
 | Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
 | Scias learns Identify | Restores the cut Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
 | Better Descriptions | Naro's descriptions of hidden item, equipment and master effects |
+| 60 fps (experimental) | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Off by default; Scroll Lock switches it off and on while playing |
 
 ## For players
 
@@ -35,6 +36,13 @@ Notes:
   [reverb]
   wet=100   ; reverb level in % of the PS1's (0 = off)
   ```
+- **60 fps bug reports:** add to `BOF4_reverb.ini`:
+  ```ini
+  [fps60]
+  dump=1    ; Pause saves the last second of frames to fps60_dump\ (about 6 MB per frame)
+  log=1     ; per-second statistics in BOF4_fps60.log
+  ```
+  Press Pause right after a glitch and attach the `fps60_dump` folder (zipped) to the issue.
 
 ## Status – testing wanted
 
@@ -48,7 +56,8 @@ did, where you were in the game, and, if possible, a save file.
 | Stutter fix, reverb | Tested over long play sessions |
 | Music loops | Many songs checked by ear and sample-exact in game; not every song in every area has been heard. Report any song whose loop sounds off (jump, gap, replayed intro), with the area |
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
-| **Steam version** | **Not supported.** The installer only accepts the English GOG files and refuses anything else, so it won't damage a Steam install. The Steam exe is protected differently and has not been examined. Help from Steam owners is welcome |
+| **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -69,6 +78,7 @@ Inputs (never committed; set the paths in `config.py` or with environment variab
 Build:
 ```bat
 reverb\build.bat
+steam\build.bat
 py build_mod.py
 ```
 `build_mod.py` writes `mod\BOF4_Uncut_EN.exe`. The installer embeds only the differences from the original
@@ -91,7 +101,8 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `identify_icons.py` | the Identify screen's element icons (font glyphs, labels); run it for a preview image |
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
-| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`) and loop engine (`loops.c`, `loops_table.h`) |
+| `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
+| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`) and 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |
 | `art\` | installer artwork (see credits) |
@@ -119,6 +130,19 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
     frame that the game's decoder garbles.
   - **Reverb:** it runs the PS1 reverb ("Studio Medium", depth 64/127, as the PS1 sound driver sets it) on
     the decoded music.
+
+- **60 fps** (`reverb\fps60.c`): the game draws each 30 fps frame as one batch of pre-transformed vertices
+  and presents it one vblank later. Two calls in the exe (the frame's screen pass and the present) go
+  through `bof4_reverb.dll`, which draws a blend of the previous and the current frame in that skipped vblank:
+  - 3D geometry carries its view depth, so it is unprojected and moved by half the camera change (the camera
+    matrix the game keeps at `0xBAD7F4`); things that move on their own are found in the previous frame by
+    texture and UVs and blended on screen.
+  - Sprites and 2D layers are matched to the previous frame (texture, UVs, colour, nearest position, only
+    unambiguous matches); a character's parts move as one; UI that jumps (menu lists, text) is not blended.
+  - Corners shared by neighbouring polygons move together (no cracks). Cuts, loading and screens at other
+    frame rates show the frame twice, as before.
+  - Frame pacing: the game's limiter alternated 32 and 34 ms frames for whole seconds; with the option on,
+    frames are paced to exactly 33.3 ms and the in-between frame goes out halfway.
 
 ## Credits
 

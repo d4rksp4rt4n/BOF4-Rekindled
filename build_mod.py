@@ -6,6 +6,7 @@
 import base64, hashlib, itertools, os, subprocess, zipfile, zlib
 import config
 import patch_uncut_en as P
+from steam.mem_list import mem_list
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME = os.path.dirname(HERE)
@@ -27,7 +28,9 @@ OPTIONS = [  # id, label, description (shown in the installer)
      "Restores the cut Identify ability (level 3), with element icons on its screen as in the PS1 hack."),
     ("desc", "Better Descriptions (by Naro)",
      "Item, equipment and master descriptions list hidden effects and resistances."),
-]
+    ("fps60", "60 fps (experimental)",
+     "Draws an in-between frame for each 30 fps frame (uses bof4_reverb.dll). Scroll Lock: off/on.", "off"),
+]   # id, label, description[, "off" = unticked by default]
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
 # Naro's PC release (Nexus): one BPS patch per DAT file, against the English GOG files.
@@ -68,14 +71,19 @@ def build_variants():
     exe = open(config.CLEAN_EXE, "rb").read()
     for n in range(1, len(P.EXE_PARTS) + 1):
         for key in itertools.combinations(P.EXE_PARTS, n):
-            v.append(("BOF4.exe", key, exe, P.patch_exe(exe, key)))
+            patched = P.patch_exe(exe, key)
+            v.append(("BOF4.exe", key, exe, patched))
+            # Steam: the same patch, applied in memory by the loader (steam\version.dll)
+            v.append(("BOF4_Uncut_EN.mem", key, b"", mem_list(exe, patched).encode()))
+    v.append(("version.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "version.dll"), "rb").read()))
     for f, msgs in P.LINES.items():
         v.append(("DAT\\" + f, ("uncut",), en(f), P.patch_text(en(f), msgs)))
     for f in P.STORE:
         v.append(("DAT\\" + f, ("dengeki",), en(f), P.patch_store(en(f))))
     dll = open(os.path.join(HERE, "reverb", "bof4_reverb.dll"), "rb").read()
-    for key in (("reverb",), ("loops",), ("reverb", "loops")):        # same DLL serves both options
-        v.append(("bof4_reverb.dll", key, b"", dll))
+    for n in range(1, 4):                                              # same DLL serves all three options
+        for key in itertools.combinations(("reverb", "loops", "fps60"), n):
+            v.append(("bof4_reverb.dll", key, b"", dll))
     for f, patch in P.IDENTIFY_DATS.items():
         v.append(("DAT\\" + f, ("identify",), en(f), patch(en(f))))
     z = zipfile.ZipFile(DESC_ZIP)
@@ -105,7 +113,7 @@ def ops(src, dst):
     return out
 
 def manifest():
-    lines = ["O {}|{}|{}".format(*o) for o in OPTIONS]
+    lines = ["O " + "|".join(o) for o in OPTIONS]
     for path, key, src, dst in build_variants():
         o = ops(src, dst)
         assert b"".join(src[a[1]:a[1] + a[2]] if a[0] == "C" else a[1] for a in o) == dst

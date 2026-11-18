@@ -24,10 +24,19 @@ class Installer : Form
     readonly List<Variant> variants = new List<Variant>();
     readonly TextBox folder = new TextBox(), log = new TextBox();
     readonly List<CheckBox> boxes = new List<CheckBox>();
-    public const string Version = "1.1";           // release tag on GitHub: "1.1" or "1.1.0"
+    public const string Version = "1.2";           // release tag on GitHub: "1.2" or "1.2.0"
     const string Repo = "d4rksp4rt4n/bof4-english-uncut";
     readonly LinkLabel update = new LinkLabel { Visible = false, AutoSize = true };
     const string BackupDir = "BOF4_Uncut_EN_backup";
+    // Steam: BOF4.exe is the GOG exe inside an Enigma wrapper (encrypted on disk), so it stays untouched and
+    // version.dll applies the exe patch in memory (from BOF4_Uncut_EN.mem). The other files equal GOG's.
+    const string SteamExe = "86f401f951e05458c36de3a1fb90af833a31ed6c947c378600f1a3869cdbef6e";
+    static readonly string[] SteamOnly = { "version.dll", "BOF4_Uncut_EN.mem" };
+    static bool IsSteam(string game) { return Sha(File.ReadAllBytes(Path.Combine(game, "BOF4.exe"))) == SteamExe; }
+    IEnumerable<IGrouping<string, Variant>> Files(bool steam)
+    {
+        return variants.GroupBy(v => v.Path).Where(g => steam ? g.Key != "BOF4.exe" : !SteamOnly.Contains(g.Key));
+    }
     static readonly string Empty = Sha(new byte[0]);
 
     [STAThread]
@@ -68,7 +77,7 @@ class Installer : Form
         y += 60;
         foreach (var o in options)
         {
-            var cb = new CheckBox { Text = o[1], Checked = true, Location = new Point(16, y), AutoSize = true,
+            var cb = new CheckBox { Text = o[1], Checked = o.Length < 4 || o[3] != "off", Location = new Point(16, y), AutoSize = true,
                                     Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Tag = o[0] };
             var desc = new Label { Text = o[2], Location = new Point(34, y + 22), Size = new Size(590, 18), ForeColor = Dim };
             boxes.Add(cb); Controls.Add(cb); Controls.Add(desc); y += 46;
@@ -209,17 +218,20 @@ class Installer : Form
     {
         string game = folder.Text;
         if (!File.Exists(Path.Combine(game, "BOF4.exe"))) return;
-        var installed = new HashSet<string>(); bool any = false;
-        foreach (var g in variants.GroupBy(v => v.Path))
+        var installed = new HashSet<string>(); bool any = false, steam = IsSteam(game);
+        foreach (var g in Files(steam))
         {
             string p = Path.Combine(game, g.Key);
             if (!File.Exists(p)) continue;
             string h = Sha(File.ReadAllBytes(p));
-            var hit = g.FirstOrDefault(v => v.Dst == h);
-            if (hit != null) { any = true; foreach (var k in hit.Key.Split(',')) installed.Add(k); }
+            var hits = g.Where(v => v.Dst == h).Select(v => v.Key.Split(',')).ToList();
+            if (hits.Count == 0) continue;                    // same file for several keys: only what they share
+            any = true; installed.UnionWith(hits.Aggregate((a, b) => a.Intersect(b).ToArray()));
         }
         if (any) foreach (var b in boxes) b.Checked = installed.Contains((string)b.Tag);
         log.Clear();
+        if (steam) Log("Steam version found (experimental): BOF4.exe stays untouched; version.dll applies its changes " +
+                       "in memory at start and writes BOF4_Uncut_EN.log.");
         Log(any ? "Found an earlier install of this mod; the ticked options are the ones installed."
                 : "Ready. Tick what you want and press Apply.");
         if (File.Exists(Path.Combine(game, "d3d9.dll")))
@@ -235,7 +247,10 @@ class Installer : Form
         {
             if (!File.Exists(Path.Combine(game, "BOF4.exe"))) throw new Exception("BOF4.exe not found in that folder.");
             var plan = new List<Tuple<string, byte[], Variant>>();   // path, original bytes, target (null = original)
-            foreach (var g in variants.GroupBy(v => v.Path))
+            bool steam = IsSteam(game);
+            var exeParts = new HashSet<string>(variants.Where(v => v.Path == "BOF4.exe").SelectMany(v => v.Key.Split(',')));
+            if (steam && chosen.Any(exeParts.Contains)) chosen.Add("loader");
+            foreach (var g in Files(steam))
             {
                 string p = Path.Combine(game, g.Key), bak = Path.Combine(game, BackupDir, g.Key);
                 string orig = g.First().Src;
@@ -247,13 +262,16 @@ class Installer : Form
                 byte[] cur = File.Exists(p) ? File.ReadAllBytes(p) : new byte[0]; string h = Sha(cur);
                 byte[] src;
                 if (h == orig) src = cur;
+                else if (added && SteamOnly.Contains(g.Key) && !g.Any(v => v.Dst == h))
+                    throw new Exception(g.Key + " is already there and isn't this mod's (another mod's loader?). " +
+                                        "Move it away first." + Environment.NewLine + "Nothing was changed.");
                 else if (added) src = new byte[0];                // only this mod adds it (maybe an older build of it)
                 else if (File.Exists(bak) && Sha(File.ReadAllBytes(bak)) == orig)
                 {                                                 // patched before, maybe by an older version
                     src = File.ReadAllBytes(bak);
                     if (!g.Any(v => v.Dst == h)) Log(g.Key + ": not from this version; rebuilding from the backed-up original.");
                 }
-                else throw new Exception(g.Key + " is not the original English GOG file (another mod, or the German patch's files?)." +
+                else throw new Exception(g.Key + " is not the original English GOG/Steam file (another mod, or the German patch's files?)." +
                                          Environment.NewLine + "Nothing was changed.");
                 if ((target == null ? orig : target.Dst) != h) plan.Add(Tuple.Create(g.Key, src, target));
             }

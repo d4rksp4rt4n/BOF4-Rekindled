@@ -21,6 +21,11 @@ reverb/*.exe
 reverb/*.obj
 reverb/*.lib
 reverb/*.exp
+steam/*.dll
+steam/*.obj
+steam/*.lib
+steam/*.exp
+*.mem
 
 # Local tool state
 __pycache__/

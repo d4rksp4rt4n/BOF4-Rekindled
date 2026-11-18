@@ -348,7 +348,50 @@ IDENTIFY_DATS = {"INIT.DAT": identify_icons.patch_font,
 SCIAS_LEVELS = bytes.fromhex("0700060017101322" "1f000b001e102131")   # his level 1 and 2 entries
 IDENTIFY = 0xEF
 
-EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify")
+# 60 fps (reverb\fps60.c): the frame flush's screen pass (0x40AC03) and PutDrawEnv's present (0x410A47) go
+# through bof4_fps_screen / bof4_fps_present in bof4_reverb.dll, which draw and present an interpolated
+# in-between frame. A stub loads the DLL once; without it (or its exports) the original calls run.
+FPS = 0x6A7D00                     # [loaded][pad3][fn_screen][fn_present][pad4] code
+SCREEN_SITE, EXEC = 0x40AC03, 0x40A8A0
+PRESENT_SITE, PRESENT = 0x410A47, 0x4028D0
+
+def fps_code():
+    loaded, f_screen, f_present = FPS, FPS + 4, FPS + 8
+    c = bytearray(16)
+    a32 = lambda v: struct.pack("<I", v)
+    here = lambda: FPS + len(c)
+    fix, labels = [], {}
+    def ref(label): c.extend(b"\0\0\0\0"); fix.append((len(c) - 4, label))
+    ensure = here()
+    c += b"\x80\x3d" + a32(loaded) + b"\x00"            # cmp byte [loaded], 0
+    j_done = len(c); c += b"\x75\x00"                   # jne done
+    c += b"\x60"                                        # pushad
+    c += b"\xc7\x05" + a32(f_screen) + a32(EXEC)        # defaults: the original functions
+    c += b"\xc7\x05" + a32(f_present) + a32(PRESENT)
+    c += b"\x68"; ref("dll"); c += b"\xff\x15" + a32(LOADLIB)
+    c += b"\x89\xc6\x85\xf6"                            # mov esi, eax; test esi, esi
+    j_fin = len(c); c += b"\x74\x00"                    # jz fin
+    c += b"\x68"; ref("p_screen"); c += b"\x56\xff\x15" + a32(GETPROC)
+    c += b"\x89\xc3\x85\xdb"                            # mov ebx, eax; test ebx, ebx
+    j_fin2 = len(c); c += b"\x74\x00"                   # jz fin (both exports or neither)
+    c += b"\x68"; ref("p_present"); c += b"\x56\xff\x15" + a32(GETPROC)
+    c += b"\x85\xc0"                                    # test eax, eax
+    j_fin3 = len(c); c += b"\x74\x00"
+    c += b"\x89\x1d" + a32(f_screen) + b"\xa3" + a32(f_present)
+    fin = len(c)
+    for j in (j_fin, j_fin2, j_fin3): c[j + 1] = fin - (j + 2)
+    c += b"\xc6\x05" + a32(loaded) + b"\x01"            # mov byte [loaded], 1
+    c += b"\x61"                                        # popad
+    c[j_done + 1] = len(c) - (j_done + 2)
+    c += b"\xc3"
+    screen = here(); c += b"\xe8" + rel(here() + 5, ensure) + b"\xff\x25" + a32(f_screen)
+    present = here(); c += b"\xe8" + rel(here() + 5, ensure) + b"\xff\x25" + a32(f_present)
+    for name, s in (("dll", b"bof4_reverb.dll"), ("p_screen", b"bof4_fps_screen"), ("p_present", b"bof4_fps_present")):
+        labels[name] = here(); c += s + b"\0"
+    for pos, label in fix: struct.pack_into("<I", c, pos, labels[label])
+    return bytes(c), screen, present
+
+EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60")
 
 def patch_exe(d, parts=EXE_PARTS):
     d = bytearray(d)
@@ -386,6 +429,17 @@ def patch_exe(d, parts=EXE_PARTS):
         d[fo(BEGIN_SITE):fo(BEGIN_SITE) + 11] = b"\xe8" + rel(BEGIN_SITE + 5, begin) + b"\x90" * 6
     if "stutter" in parts:
         d[fo(FILL_SITE):fo(FILL_SITE) + 5] = b"\xe8" + rel(FILL_SITE + 5, set_flag)
+        make_text_writable(d)                              # its flag byte lives in the cave
+    fc, f_screen, f_present = fps_code()
+    assert FPS >= MUSIC + len(mc) and FPS + len(fc) <= 0x6A8000
+    assert d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] == b"\xe8" + rel(SCREEN_SITE + 5, EXEC), "unexpected code at screen pass"
+    assert d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] == b"\xe8" + rel(PRESENT_SITE + 5, PRESENT), "unexpected code at present"
+    if "fps60" in parts:
+        assert d[fo(FPS):fo(FPS) + len(fc)] == bytes(len(fc)), "fps60 cave not free"
+        d[fo(FPS):fo(FPS) + len(fc)] = fc
+        d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] = b"\xe8" + rel(SCREEN_SITE + 5, f_screen)
+        d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
+        make_text_writable(d)                              # stub data lives in the cave
     lv = d.find(SCIAS_LEVELS)
     assert lv > 0 and d.count(SCIAS_LEVELS) == 1 and d[lv + 16] == 0, "Scias' level-up table not as expected"
     if "identify" in parts:
