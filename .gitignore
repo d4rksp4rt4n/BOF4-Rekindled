@@ -31,3 +31,6 @@ steam/*.exp
 __pycache__/
 *.log
 BOF4_reverb.ini
+
+# Widescreen test dumps (large, local only)
+reverb/ws_dumps/
