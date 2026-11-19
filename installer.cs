@@ -189,8 +189,8 @@ class Installer : Form
 
     void LoadManifest()
     {
-        using (var s = typeof(Installer).Assembly.GetManifestResourceStream("manifest.txt"))
-        using (var r = new StreamReader(s))
+        using (var s = typeof(Installer).Assembly.GetManifestResourceStream("manifest.gz"))
+        using (var r = new StreamReader(new System.IO.Compression.GZipStream(s, System.IO.Compression.CompressionMode.Decompress)))
         {
             Variant cur = null; string l;
             while ((l = r.ReadLine()) != null)

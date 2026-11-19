@@ -33,6 +33,17 @@ Options:
         [fps60]
         dump=1         ; Pause saves the last second of frames to fps60_dump\ (~6 MB per frame)
     press Pause right after the glitch and attach the fps60_dump folder (zipped) to the report.
+  - No PS1 wobble: in rooms with lighting effects (North Chamba and a few others) the PC port
+    snapped the 3D to whole PS1 pixels, so walls and floors swam like on a PlayStation. This
+    keeps the exact positions.
+  - Sprite depth scaling (off by default): characters are fixed-size sprites while the 3D
+    around them shrinks with distance, so far-away ones seem to grow. This shrinks characters
+    further away than the player like the 3D around them (bof4_reverb.dll). Insert switches
+    between shrink only, full perspective and off while playing (shown in the window title).
+    To change the starting mode or the strength, add to BOF4_reverb.ini:
+        [sprites]
+        strength=100   ; % of the full perspective size change
+        grow=1         ; characters closer to the camera get bigger too (default 0)
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
 Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected

@@ -14,6 +14,8 @@ option can be switched on or off, and "Restore original files" undoes everything
 | Scias learns Identify | Restores the cut Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
 | Better Descriptions | Naro's descriptions of hidden item, equipment and master effects |
 | 60 fps (experimental) | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Off by default; Scroll Lock switches it off and on while playing |
+| No PS1 wobble | In rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
+| Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Off by default; Insert switches between shrink only, full perspective and off while playing |
 
 ## For players
 
@@ -43,6 +45,14 @@ Notes:
   log=1     ; per-second statistics in BOF4_fps60.log
   ```
   Press Pause right after a glitch and attach the `fps60_dump` folder (zipped) to the issue.
+- **Sprite depth scaling tuning:** in `BOF4_reverb.ini`:
+  ```ini
+  [sprites]
+  strength=100  ; % of the full perspective size change
+  grow=0        ; 1 = characters closer to the camera than the player get bigger too (full perspective)
+  ```
+  Insert cycles shrink only, full and off while playing, starting from this setting; the window title shows
+  the current mode.
 
 ## Status – testing wanted
 
@@ -57,6 +67,7 @@ did, where you were in the game, and, if possible, a save file.
 | Music loops | Many songs checked by ear and sample-exact in game; not every song in every area has been heard. Report any song whose loop sounds off (jump, gap, replayed intro), with the area |
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
+| No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Report rooms that still swim, or characters whose size looks wrong or jumps |
 | **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
@@ -102,7 +113,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
 | `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
-| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`) and 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures) |
+| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures) and sprite depth scaling (`sprites.c`) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |
 | `art\` | installer artwork (see credits) |
@@ -143,6 +154,14 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
     frame rates show the frame twice, as before.
   - Frame pacing: the game's limiter alternated 32 and 34 ms frames for whole seconds; with the option on,
     frames are paced to exactly 33.3 ms and the in-between frame goes out halfway.
+- **No PS1 wobble:** the map renderer keeps each polygon's screen corners both rounded (what the PS1 drew) and
+  exact (what the PC port draws). On maps with a per-vertex lighting effect it rebuilt the exact corners from
+  the rounded ones after running the effect, which snaps them by up to 4 screen pixels. The patch keeps the
+  exact corners and adds only what the effect itself changed.
+- **Sprite depth scaling** (`reverb\sprites.c`): every character is drawn around one anchor, its projected feet,
+  and its sprite packets already carry a scale factor (always 1). The DLL records each anchor's view depth when
+  the game projects it and, at draw time, scales the character by the player's depth over its own (only when
+  that shrinks it, unless `grow=1`). The camera follows the player, so the player keeps its size.
 
 ## Credits
 

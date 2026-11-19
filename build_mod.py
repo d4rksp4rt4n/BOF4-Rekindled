@@ -3,7 +3,7 @@
 # combination of options that touches a file.   py build_mod.py
 # Build-time inputs (paths in config.py): clean English GOG DAT files and BOF4.exe, Naro's Better Descriptions
 # PC zip (Nexus) in the game folder.
-import base64, hashlib, itertools, os, subprocess, zipfile, zlib
+import base64, gzip, hashlib, itertools, os, subprocess, zipfile, zlib
 import config
 import patch_uncut_en as P
 from steam.mem_list import mem_list
@@ -30,6 +30,10 @@ OPTIONS = [  # id, label, description (shown in the installer)
      "Item, equipment and master descriptions list hidden effects and resistances."),
     ("fps60", "60 fps (experimental)",
      "Draws an in-between frame for each 30 fps frame (uses bof4_reverb.dll). Scroll Lock: off/on.", "off"),
+    ("wobble", "No PS1 wobble",
+     "Rooms with lighting effects (North Chamba...) keep exact 3D positions instead of snapping to PS1 pixels."),
+    ("sprites", "Sprite depth scaling",
+     "Characters far from the camera shrink like the 3D around them instead of seeming to grow (bof4_reverb.dll).", "off"),
 ]   # id, label, description[, "off" = unticked by default]
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
@@ -81,8 +85,9 @@ def build_variants():
     for f in P.STORE:
         v.append(("DAT\\" + f, ("dengeki",), en(f), P.patch_store(en(f))))
     dll = open(os.path.join(HERE, "reverb", "bof4_reverb.dll"), "rb").read()
-    for n in range(1, 4):                                              # same DLL serves all three options
-        for key in itertools.combinations(("reverb", "loops", "fps60"), n):
+    dll_parts = ("reverb", "loops", "fps60", "sprites")                # same DLL serves all of them
+    for n in range(1, len(dll_parts) + 1):
+        for key in itertools.combinations(dll_parts, n):
             v.append(("bof4_reverb.dll", key, b"", dll))
     for f, patch in P.IDENTIFY_DATS.items():
         v.append(("DAT\\" + f, ("identify",), en(f), patch(en(f))))
@@ -157,12 +162,12 @@ def make_art(tmp):
 def main():
     os.makedirs(OUT, exist_ok=True)
     tmp = os.path.join(HERE, "build_tmp"); os.makedirs(tmp, exist_ok=True)
-    man = os.path.join(tmp, "manifest.txt")
-    open(man, "w", encoding="ascii", newline="\n").write(manifest())
+    man = os.path.join(tmp, "manifest.gz")             # deflate: 8 MB -> 2 MB (15 identical DLL variants etc.)
+    with gzip.open(man, "wb", 9) as f: f.write(manifest().encode("ascii"))
     banner, icon = make_art(tmp)
     exe = os.path.join(OUT, "BOF4_Uncut_EN.exe")
     subprocess.run([CSC, "/nologo", "/target:winexe", "/optimize+", f"/out:{exe}", f"/win32icon:{icon}",
-                    f"/resource:{man},manifest.txt", f"/resource:{banner},banner.png",
+                    f"/resource:{man},manifest.gz", f"/resource:{banner},banner.png",
                     "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll",
                     os.path.join(HERE, "installer.cs")], check=True)
     for f in ("BOF4_Uncut_EN.ps1", "Install.bat", "Uninstall.bat"):   # older script-based installer

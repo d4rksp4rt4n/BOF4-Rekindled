@@ -348,6 +348,49 @@ IDENTIFY_DATS = {"INIT.DAT": identify_icons.patch_font,
 SCIAS_LEVELS = bytes.fromhex("0700060017101322" "1f000b001e102131")   # his level 1 and 2 entries
 IDENTIFY = 0xEF
 
+# PS1 wobble: the map mesh renderer keeps each quad's screen corners twice, rounded (int16 0xB52F90..9F, what
+# the PS1 drew) and exact (float 0xB52FA0..BF, what the PC port draws). On maps with a per-vertex effect
+# ([0xB53029] != 0: North Chamba and a few others) it runs the effect and then rebuilds all eight floats from
+# the rounded ints, so every corner snaps to whole PS1 pixels (up to 4 screen pixels at 1280x960) and the room
+# swims like on a PS1. The rebuild (three copies, one per renderer) becomes: float += int - trunc(float).
+# The ints are the truncated floats (ftol), so untouched corners stay exact and effects that move corners keep
+# their offset.
+WOBBLE_BLOCKS = (0x65F740, 0x660230, 0x661434)    # each: 8x movsx/fild/fstp, 0xA8 bytes, after call 0x6656B0
+WOBBLE_LEN = 0xA8
+SXY_INT, SXY_FLOAT, FTOL = 0xB52F90, 0xB52FA0, 0x69E924
+
+def wobble_code():
+    """[(va, bytes)]: the shared routine lives in the first block; every block calls it and skips the rest."""
+    a32 = lambda v: struct.pack("<I", v)
+    fix = WOBBLE_BLOCKS[0] + 10
+    r = bytearray(b"\x56\x31\xf6")                                  # push esi; xor esi, esi
+    loop = len(r)
+    r += b"\xd9\x04\xb5" + a32(SXY_FLOAT)                          # fld dword [esi*4 + float]
+    r += b"\xe8" + rel(fix + len(r) + 5, FTOL)                      # call ftol (truncates; eax)
+    r += b"\x0f\xbf\xc0"                                            # movsx eax, ax
+    r += b"\x0f\xbf\x0c\x75" + a32(SXY_INT)                        # movsx ecx, word [esi*2 + int]
+    r += b"\x29\xc1"                                                # sub ecx, eax
+    skip = len(r); r += b"\x74\x00"                                 # je next
+    r += b"\x51\xdb\x04\x24"                                        # push ecx; fild dword [esp]
+    r += b"\xd8\x04\xb5" + a32(SXY_FLOAT)                          # fadd dword [esi*4 + float]
+    r += b"\xd9\x1c\xb5" + a32(SXY_FLOAT)                          # fstp dword [esi*4 + float]
+    r += b"\x59"                                                    # pop ecx
+    r[skip + 1] = len(r) - (skip + 2)
+    r += b"\x46\x83\xfe\x08\x72" + bytes([(loop - (len(r) + 6)) & 0xFF])  # inc esi; cmp esi, 8; jb loop
+    r += b"\x5e\xc3"                                                # pop esi; ret
+    out = []
+    for i, b in enumerate(WOBBLE_BLOCKS):
+        c = b"\xe8" + rel(b + 5, fix) + b"\xe9" + rel(b + 10, b + WOBBLE_LEN)
+        if i == 0: c += r
+        out.append((b, c + b"\x90" * (WOBBLE_LEN - len(c))))
+    return out
+
+def wobble_orig_ok(d, b):              # call 0x6656B0; movsx r, [int x0] ... 8x fild [esp+n] ... fstp [float y3]
+    blk = d[fo(b):fo(b) + WOBBLE_LEN]
+    return (d[fo(b) - 5:fo(b)] == b"\xe8" + rel(b, 0x6656B0) and blk[:2] == b"\x0f\xbf"
+            and blk[3:7] == struct.pack("<I", SXY_INT) and blk.count(b"\xdb\x44\x24") == 8
+            and blk[-6:] == b"\xd9\x1d" + struct.pack("<I", SXY_FLOAT + 0x1C))
+
 # 60 fps (reverb\fps60.c): the frame flush's screen pass (0x40AC03) and PutDrawEnv's present (0x410A47) go
 # through bof4_fps_screen / bof4_fps_present in bof4_reverb.dll, which draw and present an interpolated
 # in-between frame. A stub loads the DLL once; without it (or its exports) the original calls run.
@@ -391,7 +434,55 @@ def fps_code():
     for pos, label in fix: struct.pack_into("<I", c, pos, labels[label])
     return bytes(c), screen, present
 
-EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60")
+# Sprite depth scaling (reverb\sprites.c): characters are fixed-size sprites, so they look too big far away and
+# too small up close next to the perspective-correct 3D. Three calls go through bof4_reverb.dll: the actor
+# projection (anchor -> view depth) and the draw calls of the two character sprite packets (body 0x9C, shadow
+# 0x96), which get their scale fields multiplied for the draw. Without the DLL (or its exports) the original
+# calls run.
+SPR = 0x6A7DC0                     # [loaded][fn x3] code
+SPR_SITES = ((0x676C0B, 0x6641E0, b"bof4_spr_project"),    # call: project actor position (world, &sxy, &fxy)
+             (0x402B48, 0x408B30, b"bof4_spr_draw96"),     # DrawOTag case 0x96: call draw(packet)
+             (0x402B56, 0x409E10, b"bof4_spr_draw9c"))     # DrawOTag case 0x9C
+
+def spr_code():
+    """Stub that loads bof4_reverb.dll once and resolves all exports (or none); one jump stub per site."""
+    a32 = lambda v: struct.pack("<I", v)
+    loaded, fn = SPR, [SPR + 4 + 4 * i for i in range(len(SPR_SITES))]
+    c = bytearray(4 + 4 * len(SPR_SITES))
+    here = lambda: SPR + len(c)
+    fix, labels = [], {}
+    def ref(label): c.extend(b"\0\0\0\0"); fix.append((len(c) - 4, label))
+    ensure = here()
+    c += b"\x80\x3d" + a32(loaded) + b"\x00"            # cmp byte [loaded], 0
+    j_done = len(c); c += b"\x0f\x85\0\0\0\0"           # jne done (near)
+    c += b"\x60\x89\xe5"                                # pushad; mov ebp, esp
+    for f, (_, orig, _) in zip(fn, SPR_SITES):
+        c += b"\xc7\x05" + a32(f) + a32(orig)           # defaults: the original functions
+    c += b"\x68"; ref("dll"); c += b"\xff\x15" + a32(LOADLIB)
+    c += b"\x89\xc6\x85\xf6"                            # mov esi, eax; test esi, esi
+    j_fin = [len(c)]; c += b"\x74\x00"                  # jz fin
+    for i in range(len(SPR_SITES)):
+        c += b"\x68"; ref(i); c += b"\x56\xff\x15" + a32(GETPROC)   # GetProcAddress(dll, name)
+        c += b"\x85\xc0"; j_fin.append(len(c)); c += b"\x74\x00\x50"  # test eax, eax; jz fin; push eax
+    for f in reversed(fn):
+        c += b"\x58\xa3" + a32(f)                       # pop eax; mov [fn], eax
+    fin = len(c)
+    for j in j_fin: c[j + 1] = fin - (j + 2)
+    c += b"\x89\xec"                                    # mov esp, ebp
+    c += b"\xc6\x05" + a32(loaded) + b"\x01"            # mov byte [loaded], 1
+    c += b"\x61"                                        # popad
+    struct.pack_into("<i", c, j_done + 2, len(c) - (j_done + 6))
+    c += b"\xc3"
+    stubs = []
+    for f in fn:
+        stubs.append(here()); c += b"\xe8" + rel(here() + 5, ensure) + b"\xff\x25" + a32(f)
+    labels["dll"] = here(); c += b"bof4_reverb.dll\0"
+    for i, (_, _, name) in enumerate(SPR_SITES):
+        labels[i] = here(); c += name + b"\0"
+    for pos, label in fix: struct.pack_into("<I", c, pos, labels[label])
+    return bytes(c), stubs
+
+EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites")
 
 def patch_exe(d, parts=EXE_PARTS):
     d = bytearray(d)
@@ -440,6 +531,20 @@ def patch_exe(d, parts=EXE_PARTS):
         d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] = b"\xe8" + rel(SCREEN_SITE + 5, f_screen)
         d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
         make_text_writable(d)                              # stub data lives in the cave
+    sc, stubs = spr_code()
+    assert SPR >= FPS + len(fc) and SPR + len(sc) <= 0x6A8000
+    for site, fn, _ in SPR_SITES:
+        assert d[fo(site):fo(site) + 5] == b"\xe8" + rel(site + 5, fn), f"unexpected code at {site:#x}"
+    if "sprites" in parts:
+        assert d[fo(SPR):fo(SPR) + len(sc)] == bytes(len(sc)), "sprites cave not free"
+        d[fo(SPR):fo(SPR) + len(sc)] = sc
+        for (site, _, _), stub in zip(SPR_SITES, stubs):
+            d[fo(site):fo(site) + 5] = b"\xe8" + rel(site + 5, stub)
+        make_text_writable(d)                              # stub data lives in the cave
+    for b in WOBBLE_BLOCKS:
+        assert wobble_orig_ok(d, b), f"unexpected code at {b:#x}"
+    if "wobble" in parts:
+        for va, c in wobble_code(): d[fo(va):fo(va) + len(c)] = c
     lv = d.find(SCIAS_LEVELS)
     assert lv > 0 and d.count(SCIAS_LEVELS) == 1 and d[lv + 16] == 0, "Scias' level-up table not as expected"
     if "identify" in parts:
