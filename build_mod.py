@@ -34,6 +34,8 @@ OPTIONS = [  # id, label, description (shown in the installer)
      "Rooms with lighting effects (North Chamba...) keep exact 3D positions instead of snapping to PS1 pixels."),
     ("sprites", "Sprite depth scaling",
      "Characters far from the camera shrink like the 3D around them instead of seeming to grow (bof4_reverb.dll).", "off"),
+    ("widescreen", "Widescreen (experimental)",
+     "At a 16:9 resolution the 3D fills the screen with correct proportions; menus stay 4:3 (bof4_reverb.dll).", "off"),
 ]   # id, label, description[, "off" = unticked by default]
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
@@ -69,36 +71,34 @@ def bps(src, p):
 
 # ---------------------------------------------------------------- variants
 def build_variants():
-    """[(path, key, original, patched)], key = tuple of option ids applied."""
+    """Yields (path, key, original, patched), key = tuple of option ids applied (one at a time: 2046 exe variants)."""
     en = lambda f: open(os.path.join(config.CLEAN_DAT, f), "rb").read()
-    v = []
     exe = open(config.CLEAN_EXE, "rb").read()
     for n in range(1, len(P.EXE_PARTS) + 1):
         for key in itertools.combinations(P.EXE_PARTS, n):
             patched = P.patch_exe(exe, key)
-            v.append(("BOF4.exe", key, exe, patched))
+            yield ("BOF4.exe", key, exe, patched)
             # Steam: the same patch, applied in memory by the loader (steam\version.dll)
-            v.append(("BOF4_Uncut_EN.mem", key, b"", mem_list(exe, patched).encode()))
-    v.append(("version.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "version.dll"), "rb").read()))
+            yield ("BOF4_Uncut_EN.mem", key, b"", mem_list(exe, patched).encode())
+    yield ("version.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "version.dll"), "rb").read())
     for f, msgs in P.LINES.items():
-        v.append(("DAT\\" + f, ("uncut",), en(f), P.patch_text(en(f), msgs)))
+        yield ("DAT\\" + f, ("uncut",), en(f), P.patch_text(en(f), msgs))
     for f in P.STORE:
-        v.append(("DAT\\" + f, ("dengeki",), en(f), P.patch_store(en(f))))
+        yield ("DAT\\" + f, ("dengeki",), en(f), P.patch_store(en(f)))
     dll = open(os.path.join(HERE, "reverb", "bof4_reverb.dll"), "rb").read()
-    dll_parts = ("reverb", "loops", "fps60", "sprites")                # same DLL serves all of them
+    dll_parts = ("reverb", "loops", "fps60", "sprites", "widescreen")  # same DLL serves all of them
     for n in range(1, len(dll_parts) + 1):
         for key in itertools.combinations(dll_parts, n):
-            v.append(("bof4_reverb.dll", key, b"", dll))
+            yield ("bof4_reverb.dll", key, b"", dll)
     for f, patch in P.IDENTIFY_DATS.items():
-        v.append(("DAT\\" + f, ("identify",), en(f), patch(en(f))))
+        yield ("DAT\\" + f, ("identify",), en(f), patch(en(f)))
     z = zipfile.ZipFile(DESC_ZIP)
     for n in z.namelist():
         f = n.replace(".bps", ".DAT")
         d = bps(en(f), z.read(n))
-        v.append(("DAT\\" + f, ("desc",), en(f), d))
+        yield ("DAT\\" + f, ("desc",), en(f), d)
         if f in P.IDENTIFY_DATS:                                       # both options touch this file
-            v.append(("DAT\\" + f, ("identify", "desc"), en(f), P.IDENTIFY_DATS[f](d)))
-    return v
+            yield ("DAT\\" + f, ("identify", "desc"), en(f), P.IDENTIFY_DATS[f](d))
 
 def ops(src, dst):
     if not src:                                            # new file (not in the original game)

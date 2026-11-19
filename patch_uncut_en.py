@@ -394,13 +394,14 @@ def wobble_orig_ok(d, b):              # call 0x6656B0; movsx r, [int x0] ... 8x
 # 60 fps (reverb\fps60.c): the frame flush's screen pass (0x40AC03) and PutDrawEnv's present (0x410A47) go
 # through bof4_fps_screen / bof4_fps_present in bof4_reverb.dll, which draw and present an interpolated
 # in-between frame. A stub loads the DLL once; without it (or its exports) the original calls run.
-FPS = 0x6A7D00                     # [loaded][pad3][fn_screen][fn_present][pad4] code
+FPS = 0x6A7D00                     # [loaded][features][pad2][fn_screen][fn_present][pad4] code
 SCREEN_SITE, EXEC = 0x40AC03, 0x40A8A0
 PRESENT_SITE, PRESENT = 0x410A47, 0x4028D0
 
-def fps_code():
+def fps_code(fps60=True, wide=False):
+    """features (read by the DLL): bit 0 = in-between frames and pacing, bit 1 = widescreen."""
     loaded, f_screen, f_present = FPS, FPS + 4, FPS + 8
-    c = bytearray(16)
+    c = bytearray(16); c[1] = (1 if fps60 else 0) | (2 if wide else 0)
     a32 = lambda v: struct.pack("<I", v)
     here = lambda: FPS + len(c)
     fix, labels = [], {}
@@ -482,7 +483,131 @@ def spr_code():
     for pos, label in fix: struct.pack_into("<I", c, pos, labels[label])
     return bytes(c), stubs
 
-EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites")
+# Widescreen (reverb\widescreen.c): the game's render size comes from bof4.cfg (dxcfg.exe), and SetScale stretches the
+# PS1's 320x240 to it, so at 16:9 everything is 33% too wide. The screen pass (same hook as 60 fps) squeezes each frame
+# back to 4:3 proportions around the centre; the 3D scene then fills the sides (Hor+). That needs polygons the PS1
+# culled: the renderers drop a polygon whose projected corners all fail "(x + 16) < 352" (unsigned 16-bit, PS1
+# pixels, x in [-16, 336)). Each check is "add/lea r, [r + 0x10]" right before "cmp r16, 0x160"; both become
+# x + 112 < 544 (x in [-112, 432), about 20:9). The list below is every such check in the exe; the one other
+# "cmp ?x, 0x160" (0x475D09) is a loop counter. One more on-screen test (0x50C7E0, a point in [-32, 352]) widens too.
+WIDE_CULLS = (                     # address of each cmp
+    0x417F80, 0x417F9B, 0x417FB6, 0x417FD8, 0x4266FA, 0x426715, 0x426737, 0x426759,
+    0x439983, 0x4399A5, 0x4399C7, 0x4399E9, 0x449FAC, 0x46E6E1, 0x46E702, 0x46E722,
+    0x46E743, 0x5F31B1, 0x5F31CC, 0x5F31EE, 0x5F3210, 0x65F249, 0x65F269, 0x65F28A,
+    0x65F2AB, 0x65FEE6, 0x65FF07, 0x65FF28, 0x65FF48, 0x661155, 0x661176, 0x661196,
+    0x6611B7, 0x6625A7, 0x6625C2, 0x6625E4, 0x662606, 0x66317F, 0x66319A, 0x6631BC,
+    0x6631DE, 0x66365E, 0x66367F, 0x66369F, 0x6636C0, 0x6660F0, 0x66610B, 0x66612D,
+    0x66614F, 0x667340, 0x667362, 0x667384, 0x6673A6)
+# The same checks' y half, "(y + 16) < 272": a big polygon over a screen corner can have no corner inside both, so it
+# vanished from the far corners of a tilted view; its top margin becomes 112 too (y + 112 < 368, y in [-112, 256)).
+# The add is "add r32, 0x10" or "add ax, 0x0010" right before "cmp r16, 0x110".
+WIDE_YCULLS = (
+    0x417F8B, 0x417FA6, 0x417FC8, 0x417FE7, 0x426705, 0x426727, 0x426749, 0x426768, 0x439995, 0x4399B7, 0x4399D9,
+    0x4399FF, 0x449FBB, 0x46E6F2, 0x46E713, 0x46E734, 0x46E758, 0x5F31BC, 0x5F31DE, 0x5F3200, 0x5F321F, 0x65F25A,
+    0x65F27B, 0x65F29B, 0x65F2C0, 0x65FEF8, 0x65FF18, 0x65FF39, 0x65FF5E, 0x661166, 0x661187, 0x6611A8, 0x6611CC,
+    0x6625B2, 0x6625D4, 0x6625F6, 0x662615, 0x66318A, 0x6631AC, 0x6631CE, 0x6631ED, 0x66366F, 0x663690, 0x6636B1,
+    0x6636D5, 0x6660FB, 0x66611D, 0x66613F, 0x66615E, 0x667352, 0x667374, 0x667396, 0x6673B5)
+WIDE_ADD = {b"\x8d\x4a\x10": 1, b"\x8d\x48\x10": 1, b"\x83\xc1\x10": 1, b"\x83\xc0\x10": 0, b"\x83\xc2\x10": 2}
+WIDE_CMP = {b"\x66\x81\xf9\x60\x01": 1, b"\x66\x81\xfa\x60\x01": 2, b"\x66\x3d\x60\x01": 0}   # cmp cx/dx/ax, 0x160
+WIDE_CODE = ((0x50C835, b"\x66\x3d\x60\x01", b"\x66\x3d\xb0\x01"),       # cmp ax, 352 -> 432
+             (0x50C83B, b"\x66\x3d\xe0\xff", b"\x66\x3d\x90\xff"),       # cmp ax, -32 -> -112
+             # map vertex wave effect (0x555DE0): applied to corners with x + 16 < 352 only
+             (0x555E10, H("83c010"), H("83c070")), (0x555E15, H("3d60010000"), H("3d20020000")),
+             (0x555E66, H("83c110"), H("83c170")), (0x555E69, H("81f960010000"), H("81f920020000")),
+             (0x555EAF, H("83c210"), H("83c270")), (0x555EB2, H("81fa60010000"), H("81fa20020000")),
+             (0x555EF2, H("83c610"), H("83c670")), (0x555EF5, H("81fe60010000"), H("81fe20020000")))
+
+# Map blocks are drawn only inside a window around the camera focus (0x660AD0 tests each block against the radii
+# [0xB53008] / [0xB5300A], world units), sized for 4:3: at 16:9 the far corners stay empty when the camera turns.
+# 0x660A20 copies the radii from 0xBAD81C/E (set by many scenes) every frame; its three callers go through a stub
+# that doubles both afterwards (the far top corners of a tilted view need much more than the 4/3 of the width).
+# Before that, 0x65ED60 / 0x65EF90 list the block rows to consider from the same radii in blocks (14 x 8 by default; a
+# diamond |dx| + |dz| <= r for some maps, which left a diagonal staircase at the top corners): the load at 0x65ECF9 goes
+# through a stub that doubles them too (28 rows each way; the list holds 64).
+WIDE_WINDOW = 0x6A7F00             # after the sprites stub, same .text padding
+WINDOW_FN, WINDOW_CALLS = 0x660A20, (0x65ED3C, 0x65ED4C, 0x660926)
+SPAN_SITE = 0x65ECF9
+SPAN_LOAD = H("66a11cd8ba00" "668b0d1ed8ba00")          # mov ax, [0xBAD81C]; mov cx, [0xBAD81E]
+# Movies (0x40DDF0) are drawn by their own DrawPrimitive, not through the frame batch, with the video's pixel size taken
+# as PS1 pixels. Their BeginScenes go through a stub that loads bof4_reverb.dll once and calls bof4_movie
+# (reverb\widescreen.c), which fits the movie to the screen at its own aspect (4:3 pillarboxed, 16:9 filling the screen,
+# any resolution) and clears the bars; without the DLL or the export, the original BeginScene runs.
+MOVIE_SITES = (0x40E1A2, 0x40E23E)                         # two-texture and one-texture branch
+MOVIE_ORIG = H("a100c2ab00" "50" "8b08" "ff5114")        # mov eax, [dev]; push eax; mov ecx, [eax]; call [ecx+0x14]
+
+# Map polygons further away than the ordering table reaches (index = (deepest corner - offset) >> shift, [0xB52FE8],
+# >= 0x400) were dropped: a 4:3 view never reached that far, a 16:9 one does at its top corners when the camera
+# turns. Each renderer's "cmp word [0xB52FE8], 0x400; jae skip" calls a stub that first clamps a too-far index to
+# 0x3FE (the back of the table; 0x3FF is a special value); negative ones (behind the camera) are still skipped.
+OTZ = 0xB52FE8
+OTZ_SITES = (0x42685A, 0x5F3311, 0x65F47B, 0x660122, 0x66134C, 0x662707, 0x6632DF, 0x666250, 0x6674A7)
+OTZ_CMP = b"\x66\x81\x3d" + struct.pack("<I", OTZ) + b"\x00\x04"         # cmp word [OTZ], 0x400 (then jae)
+
+def window_code():
+    """Returns (code, otz stub address, span stub address, movie stub address)."""
+    c = bytearray(b"\xe8" + rel(WIDE_WINDOW + 5, WINDOW_FN))
+    for a in (0xB53008, 0xB5300A):
+        c += b"\x66\xd1\x25" + struct.pack("<I", a)      # shl word [a], 1
+    c += b"\xc3"
+    otz = WIDE_WINDOW + len(c)
+    c += b"\x50\xa1" + struct.pack("<I", OTZ)            # push eax; mov eax, [OTZ]
+    c += b"\x3d\x00\x04\x00\x00\x7c\x0a"                # cmp eax, 0x400; jl +10
+    c += b"\xc7\x05" + struct.pack("<I", OTZ) + struct.pack("<I", 0x3FE)   # mov dword [OTZ], 0x3FE
+    c += b"\x58" + OTZ_CMP + b"\xc3"                     # pop eax; cmp word [OTZ], 0x400; ret
+    span = WIDE_WINDOW + len(c)
+    c += SPAN_LOAD + b"\x66\x01\xc0\x66\x01\xc9\xc3"     # (the two loads); add ax, ax; add cx, cx; ret
+    a32 = lambda v: struct.pack("<I", v)
+    here = lambda: WIDE_WINDOW + len(c)
+    loaded = here(); c += bytes(4)                                         # [loaded][pad3]
+    f_movie = here(); c += bytes(4)                                        # bof4_movie, or the original BeginScene
+    orig = here(); c += MOVIE_ORIG + b"\xc3"
+    c[f_movie - WIDE_WINDOW:f_movie - WIDE_WINDOW + 4] = a32(orig)
+    fix = []
+    def ref(label): c.extend(bytes(4)); fix.append((len(c) - 4, label))
+    movie = here()
+    c += b"\x80\x3d" + a32(loaded) + b"\x00"                              # cmp byte [loaded], 0
+    j_go = len(c); c += b"\x75\x00"                                        # jne go
+    c += b"\x60\xc6\x05" + a32(loaded) + b"\x01"                          # pushad; mov byte [loaded], 1
+    c += b"\x68"; ref("dll"); c += b"\xff\x15" + a32(LOADLIB)              # LoadLibraryA("bof4_reverb.dll")
+    c += b"\x85\xc0"; j1 = len(c); c += b"\x74\x00"                        # test eax, eax; jz fin
+    c += b"\x68"; ref("fn"); c += b"\x50\xff\x15" + a32(GETPROC)           # GetProcAddress(dll, "bof4_movie")
+    c += b"\x85\xc0"; j2 = len(c); c += b"\x74\x00"                        # test eax, eax; jz fin
+    c += b"\xa3" + a32(f_movie)                                            # mov [f_movie], eax
+    for j in (j1, j2): c[j + 1] = len(c) - (j + 2)
+    c += b"\x61"                                                           # fin: popad
+    c[j_go + 1] = len(c) - (j_go + 2)
+    c += b"\xff\x25" + a32(f_movie)                                        # go: jmp [f_movie]
+    labels = {"dll": here()}; c += b"bof4_reverb.dll\0"
+    labels["fn"] = here(); c += b"bof4_movie\0"
+    for pos, label in fix: c[pos:pos + 4] = a32(labels[label])
+    return bytes(c), otz, span, movie
+
+def wide_culls(d):
+    """[(file offset, new bytes)]; asserts every site's original instructions."""
+    out = []
+    for va in WIDE_CULLS:
+        o = fo(va)
+        cmp = [c for c in WIDE_CMP if d[o:o + len(c)] == c]
+        assert len(cmp) == 1 and WIDE_ADD.get(bytes(d[o - 3:o])) == WIDE_CMP[cmp[0]], f"unexpected cull at {va:#x}"
+        out += [(o - 1, b"\x70"), (o + len(cmp[0]) - 2, struct.pack("<H", 0x220))]
+    for va in WIDE_YCULLS:
+        o = fo(va)
+        if d[o:o + 4] == b"\x66\x3d\x10\x01": n, reg = 4, 0                      # cmp ax, 0x110
+        else:
+            assert d[o:o + 3] in (b"\x66\x81" + bytes([0xf8 + r]) for r in range(8)) and d[o + 3:o + 5] == b"\x10\x01", \
+                f"unexpected y cull at {va:#x}"
+            n, reg = 5, d[o + 2] - 0xf8                                              # cmp r16, 0x110
+        if d[o - 4:o] == b"\x66\x05\x10\x00": assert reg == 0; imm = o - 2           # add ax, 0x0010
+        else:
+            assert d[o - 3] == 0x83 and d[o - 2] == 0xc0 + reg and d[o - 1] == 0x10, f"unexpected y cull at {va:#x}"
+            imm = o - 1                                                              # add r32, 0x10
+        out += [(imm, b"\x70"), (o + n - 2, struct.pack("<H", 0x170))]
+    for va, orig, new in WIDE_CODE:
+        assert d[fo(va):fo(va) + len(orig)] == orig, f"unexpected code at {va:#x}"
+        out.append((fo(va), new))
+    return out
+
+EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites", "widescreen")
 
 def patch_exe(d, parts=EXE_PARTS):
     d = bytearray(d)
@@ -521,16 +646,39 @@ def patch_exe(d, parts=EXE_PARTS):
     if "stutter" in parts:
         d[fo(FILL_SITE):fo(FILL_SITE) + 5] = b"\xe8" + rel(FILL_SITE + 5, set_flag)
         make_text_writable(d)                              # its flag byte lives in the cave
-    fc, f_screen, f_present = fps_code()
+    fc, f_screen, f_present = fps_code("fps60" in parts, "widescreen" in parts)
     assert FPS >= MUSIC + len(mc) and FPS + len(fc) <= 0x6A8000
     assert d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] == b"\xe8" + rel(SCREEN_SITE + 5, EXEC), "unexpected code at screen pass"
     assert d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] == b"\xe8" + rel(PRESENT_SITE + 5, PRESENT), "unexpected code at present"
-    if "fps60" in parts:
+    culls = wide_culls(d)
+    if "fps60" in parts or "widescreen" in parts:         # both go through the screen pass hook
         assert d[fo(FPS):fo(FPS) + len(fc)] == bytes(len(fc)), "fps60 cave not free"
         d[fo(FPS):fo(FPS) + len(fc)] = fc
         d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] = b"\xe8" + rel(SCREEN_SITE + 5, f_screen)
-        d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
         make_text_writable(d)                              # stub data lives in the cave
+    if "fps60" in parts:
+        d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
+    wc, otz, span, movie = window_code()
+    assert WIDE_WINDOW >= SPR + len(spr_code()[0]) and WIDE_WINDOW + len(wc) <= 0x6A8000
+    assert d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] == SPAN_LOAD, f"unexpected code at {SPAN_SITE:#x}"
+    for site in MOVIE_SITES:
+        assert d[fo(site):fo(site) + len(MOVIE_ORIG)] == MOVIE_ORIG, f"unexpected code at {site:#x}"
+    for site in WINDOW_CALLS:
+        assert d[fo(site):fo(site) + 5] == b"\xe8" + rel(site + 5, WINDOW_FN), f"unexpected code at {site:#x}"
+    for site in OTZ_SITES:
+        assert d[fo(site):fo(site) + 11] == OTZ_CMP + b"\x0f\x83", f"unexpected code at {site:#x}"
+    if "widescreen" in parts:
+        for o, b in culls: d[o:o + len(b)] = b
+        assert d[fo(WIDE_WINDOW):fo(WIDE_WINDOW) + len(wc)] == bytes(len(wc)), "widescreen cave not free"
+        d[fo(WIDE_WINDOW):fo(WIDE_WINDOW) + len(wc)] = wc
+        for site in WINDOW_CALLS:
+            d[fo(site):fo(site) + 5] = b"\xe8" + rel(site + 5, WIDE_WINDOW)
+        for site in OTZ_SITES:                              # call stub; nop x4; (jae skip as before)
+            d[fo(site):fo(site) + 9] = b"\xe8" + rel(site + 5, otz) + b"\x90" * 4
+        d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] = b"\xe8" + rel(SPAN_SITE + 5, span) + b"\x90" * 8
+        for site in MOVIE_SITES:
+            d[fo(site):fo(site) + len(MOVIE_ORIG)] = b"\xe8" + rel(site + 5, movie) + b"\x90" * 6
+        make_text_writable(d)                              # the movie stub keeps a value in the cave
     sc, stubs = spr_code()
     assert SPR >= FPS + len(fc) and SPR + len(sc) <= 0x6A8000
     for site, fn, _ in SPR_SITES:

@@ -16,6 +16,7 @@ option can be switched on or off, and "Restore original files" undoes everything
 | 60 fps (experimental) | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Off by default; Scroll Lock switches it off and on while playing |
 | No PS1 wobble | In rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
 | Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Off by default; Insert switches between shrink only, full perspective and off while playing |
+| Widescreen (experimental) | At a 16:9 resolution the game stretches its 4:3 picture to the full width. This keeps the proportions right and shows more of the 3D scene at the sides instead; menus, text and the HUD stay in the centred 4:3 area, and movies play in 4:3 with black bars. Choose the resolution in the game: Camp → Settings → Screen adjust. Off by default |
 
 ## For players
 
@@ -67,6 +68,7 @@ did, where you were in the game, and, if possible, a save file.
 | Music loops | Many songs checked by ear and sample-exact in game; not every song in every area has been heard. Report any song whose loop sounds off (jump, gap, replayed intro), with the area |
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
+| **Widescreen** | **Experimental.** Tested at 1920×1080 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting), the fishing minigame, the Sand Flier race, the plains, menus and the intro movie, also together with 60 fps and sprite depth scaling. Known limits: the HUD and on-screen panels keep their 4:3 positions, so some (the fishing panels) show in the side areas; on wide flat maps (the plains) the ground can end just short of the horizon at the far sides. Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
 | No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Report rooms that still swim, or characters whose size looks wrong or jumps |
 | **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
 
@@ -113,7 +115,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
 | `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
-| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures) and sprite depth scaling (`sprites.c`) |
+| `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures), sprite depth scaling (`sprites.c`) and widescreen (`widescreen.c`) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |
 | `art\` | installer artwork (see credits) |
@@ -162,6 +164,20 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
   and its sprite packets already carry a scale factor (always 1). The DLL records each anchor's view depth when
   the game projects it and, at draw time, scales the character by the player's depth over its own (only when
   that shrinks it, unless `grow=1`). The camera follows the player, so the player keeps its size.
+- **Widescreen** (`reverb\widescreen.c`): the game scales the PS1's 320×240 picture to the chosen resolution, so at
+  16:9 everything is a third too wide. Right before each frame is drawn, the DLL squeezes it back to 4:3 proportions
+  around the centre; the 3D scene then fills the sides. For that the exe draws what the PS1 left out:
+  - the polygon culls (`x + 16 < 352`, `y + 16 < 272`) get a 112-pixel margin on every side (about 20:9);
+  - maps draw only the blocks within a radius of the camera focus (14 × 8 blocks by default, a diamond on some maps);
+    the radius is doubled, both for the list of block rows and for the per-block test;
+  - map polygons beyond the depth-sorting table's last slot go into that slot instead of being dropped.
+
+  Full-screen fades, the battle swirl (a capture of the screen), dark masks (the world map's vignette, the
+  targeting scope) and tiled backdrops (the Sand Flier race) still cover the whole screen, and sky panoramas wider
+  than the screen (the plains) fill the sides; menus and text are cut at the 4:3 edge, as on a 4:3 screen. It
+  shares the 60 fps option's hook and works with or without it. Movies are drawn by their own routine, outside the
+  frame, at the video's pixel size; the DLL fits them to the screen at the video's own aspect instead (a 4:3 movie
+  gets black bars, a 16:9 replacement video of any resolution fills the screen).
 
 ## Credits
 

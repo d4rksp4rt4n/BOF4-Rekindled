@@ -48,6 +48,7 @@ typedef unsigned char u8; typedef unsigned int u32;
 #define RFLAGS   0x96DA78
 #define EXEC     0x40A8A0      /* replays the batch: (surface, rect, flag) */
 #define PRESENT  0x4028D0      /* Flip / Blt, then clears Z */
+#define FEATURES 0x6A7D01      /* set by the exe's stub: bit 0 = 60 fps, bit 1 = widescreen (widescreen.c) */
 
 #define NEAR_Z     16.0f       /* view Z below this: vertex left as in N */
 #define TOL_STATIC 1.5f        /* PS1 pixels: matched where the camera predicts -> static in the world */
@@ -639,7 +640,7 @@ static void init(void) {
     char ini[MAX_PATH], *p; int i;
     if (g_qf.QuadPart) return;
     QueryPerformanceFrequency(&g_qf); g_t_log = now_ms();
-    for (i = 0; i < 4; i++) MEM(u32, MS_TABLE + 4 * i) = 16;
+    if (MEM(u8, FEATURES) & 1) for (i = 0; i < 4; i++) MEM(u32, MS_TABLE + 4 * i) = 16;
     GetModuleFileNameA(NULL, ini, MAX_PATH);
     if ((p = strrchr(ini, '\\')) != 0) {
         strcpy(p + 1, "BOF4_reverb.ini");
@@ -681,11 +682,16 @@ __declspec(dllexport) int __cdecl bof4_fps_present(int a) {
     return ((int(__cdecl *)(int))PRESENT)(a);
 }
 
-/* the screen pass of the frame flush (0x40AC03) */
+/* the screen pass of the frame flush (0x40AC03); also the widescreen option's, with or without 60 fps */
+void wide_exec(void *surf, int *rect, int flag);             /* widescreen.c */
+static void exec(void *surf, void *rect, int flag) {
+    if (MEM(u8, FEATURES) & 2) wide_exec(surf, rect, flag);
+    else ((void (__cdecl *)(void *, void *, int))EXEC)(surf, rect, flag);
+}
 __declspec(dllexport) void __cdecl bof4_fps_screen(void *surf, void *rect, int flag) {
-    void (__cdecl *exec)(void *, void *, int) = (void (__cdecl *)(void *, void *, int))EXEC;
     Frame *N = &g_fr[g_cur], *P = &g_fr[g_cur ^ 1];
     int key = GetAsyncKeyState(VK_SCROLL) & 0x8000;          /* Scroll Lock: in-between frames off/on */
+    if (!(MEM(u8, FEATURES) & 1)) { exec(surf, rect, flag); return; }
     init();
     if (key && !g_key_prev) g_on ^= 1;
     g_key_prev = key;

@@ -44,6 +44,11 @@ Options:
         [sprites]
         strength=100   ; % of the full perspective size change
         grow=1         ; characters closer to the camera get bigger too (default 0)
+  - Widescreen (EXPERIMENTAL, off by default): at a 16:9 resolution the game stretches its
+    4:3 picture. With this, the proportions stay right and the 3D scene fills the sides
+    (bof4_reverb.dll); menus, text, the HUD and movies stay in the centred 4:3 area. Choose the
+    resolution in the game: Camp -> Settings -> Screen adjust (e.g. 1920 x 1080). At a 4:3
+    resolution nothing changes. Please report anything cut off at the sides, with a screenshot.
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
 Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected
