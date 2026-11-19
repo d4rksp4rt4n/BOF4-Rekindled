@@ -7,14 +7,16 @@
  * widened so the polygons there exist); 2D (menus, text, HUD) stays in the centred 4:3 area.
  * Exceptions, so the picture has no 4:3 frame:
  *  - 2D primitives covering the whole width (fades, flashes, letterbox bars) are not squeezed, nor are runs of
- *    textured 2D tiles that together cover the screen behind a 3D scene (the Sand Flier race's backdrop);
- *  - nor are 2D primitives flagged 0x2000: the previous screen redrawn from a capture texture (the battle swirl, two
- *    half-screen quads), which already holds the full widescreen picture;
+ *    textured 2D tiles that together span exactly the 4:3 width (backdrops such as the Sand Flier
+ *    race's, summon skies, cloud layers drawn for the 4:3 frame): they are stretched with the screen;
+ *  - nor are full-height 2D primitives flagged 0x2000: the previous screen redrawn from a capture texture (the battle
+ *    swirl, two half-screen quads), which already holds the full widescreen picture;
  *  - untextured 2D keeps the corners it has at or beyond the left/right edge: masks reach the screen edges (the world
  *    map's vignette, the battle target scope, wipes);
  *  - textured plain 2D (rhw 1, z 0.01) is cut to the 4:3 area, as a 4:3 screen would: menus sliding off past its
- *    edge would otherwise show up in the side bars; except runs of tiles reaching past both edges in a 3D scene
- *    (scrolling sky panoramas, e.g. the plains), which only get squeezed;
+ *    edge would otherwise show up in the side bars; except runs of tiles reaching past both edges (sky panoramas such
+ *    as the plains', spell effects such as Gigaflare, Blizzard's backdrop) and single-pass semi-transparent pictures
+ *    (effects such as Blizzard's snow), which only get squeezed;
  *  - viewports (the command list can switch to a sub-rectangle) are squeezed with their contents, unless they
  *    span the whole width.
  * At 4:3 (or narrower) nothing changes. The batch is restored after the replay. */
@@ -61,8 +63,22 @@ static void clip(Vtx *p, int n, float cl, float cr) {
     }
 }
 
-typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1; u8 flat, keep; } Prim;
+typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1; u8 flat, keep, pair; } Prim;
 static Prim *g_p; static int g_cap_p;
+
+/* per frame: texture -> x range of its 2D primitives (open addressing; a full table just means "not found") */
+#define TEX_SLOTS 2048
+typedef struct { u32 tex; float x0, x1; } TexSpan;
+static TexSpan g_tex[TEX_SLOTS];
+static TexSpan *tex_span(u32 tex) {
+    u32 h = (tex * 2654435761u) >> 21, i;                       /* 11 bits */
+    for (i = 0; i < TEX_SLOTS; i++, h = (h + 1) & (TEX_SLOTS - 1)) {
+        TexSpan *s = &g_tex[h];
+        if (s->tex == tex + 1) return s;                         /* stored + 1: 0 marks an empty slot */
+        if (!s->tex) { s->tex = tex + 1; s->x0 = 1e30f; s->x1 = -1e30f; return s; }
+    }
+    return NULL;
+}
 
 static int grow(void **p, int *cap, int n, int size) {
     void *q;
@@ -73,7 +89,7 @@ static int grow(void **p, int *cap, int n, int size) {
 
 void wide_exec(void *surf, int *rect, int flag) {
     float l = (float)rect[0], r = (float)rect[2], t = (float)rect[1], bt = (float)rect[3], cx = (l + r) * 0.5f, k;
-    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, has3d = 0, i, j, m;
+    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m;
     u32 c = CMD_BASE, end = MEM(u32, CMD_PTR);
     Vtx *v = (Vtx *)VTX_BASE;
     k = r > l ? 4.0f / 3 * (bt - t) / (r - l) : 1;
@@ -96,29 +112,68 @@ void wide_exec(void *surf, int *rect, int flag) {
         if (vi + n * draws > nv) break;                          /* inconsistent batch: leave the rest */
         for (d = 0; d < draws; d++, vi += n, c += 8) {           /* a second draw has its own entry and vertices */
             Prim *p = &g_p[np++];
-            p->w = MEM(u32, c); p->tex = MEM(u32, c + 4); p->v0 = vi; p->n = n; p->flat = 1;
+            p->w = MEM(u32, c); p->tex = MEM(u32, c + 4); p->v0 = vi; p->n = n; p->flat = 1; p->pair = draws == 2;
             p->x0 = p->y0 = 1e30f; p->x1 = p->y1 = -1e30f;
             for (i = vi; i < vi + n; i++) {
                 if (v[i].x < p->x0) p->x0 = v[i].x; if (v[i].x > p->x1) p->x1 = v[i].x;
                 if (v[i].y < p->y0) p->y0 = v[i].y; if (v[i].y > p->y1) p->y1 = v[i].y;
                 if (v[i].rhw != 1.0f) p->flat = 0;
             }
-            p->keep = p->flat && ((p->x0 <= l + 0.5f && p->x1 >= r - 0.5f) || p->w & 0x2000);
-            has3d |= !p->flat;
+            p->keep = p->flat && ((p->x0 <= l + 0.5f && p->x1 >= r - 0.5f) ||      /* full width */
+                                  (p->w & 0x2000 && p->y0 <= t + 0.05f * (bt - t) && p->y1 >= bt - 0.05f * (bt - t)));
+                                  /* 0x2000 at full height: the screen redrawn from a capture (the battle swirl);
+                                     small 0x2000 quads are sparkles and get squeezed like the rest */
         }
     }
-    /* runs of consecutive textured 2D tiles (one command word) in a 3D scene: covering the screen, a backdrop
-       (keep = 1: as it is); reaching past both 4:3 edges, a scrolling panorama (keep = 2: squeezed but not cut) */
-    for (i = 0; has3d && i < np; i = j > i ? j : i + 1) {
-        float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f, area = 0;       /* area: not scattered sprites (map dots) */
+    /* a layer made for the 4:3 frame: a run of consecutive textured 2D tiles (one command word) spanning exactly the
+       4:3 width (backdrops, summon skies, cloud layers whose art ends at the edges), like a single full-width quad:
+       keep = 1, stretched with the screen. Full-width quads in the run don't count (they are kept already): the title
+       screen draws its logo and text in one run with its full-screen background, and they stay 4:3. No menu draws
+       such a layer (checked on the title, Camp and Settings screens).
+       Also a run whose tiles are all exactly one 4:3 width wide: a strip scrolled by copies placed side by side, which
+       always covers the 4:3 screen but leaves gaps at the 16:9 edges when squeezed (the dark-sky summon's clouds). */
+    for (i = 0; i < np; i = j > i ? j : i + 1) {
+        float x0 = 1e30f, x1 = -1e30f;
+        int tiles = 0, strips = 0;
         for (j = i; j < np && g_p[j].flat && g_p[j].w & 4 && g_p[j].w == g_p[i].w; j++) {
-            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1); y0 = fminf(y0, g_p[j].y0); y1 = fmaxf(y1, g_p[j].y1);
-            area += (g_p[j].x1 - g_p[j].x0) * (g_p[j].y1 - g_p[j].y0);
+            if (g_p[j].keep) continue;
+            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1); tiles++;
+            strips += fabsf(g_p[j].x1 - g_p[j].x0 - (r - l)) <= 0.5f;
         }
-        if (j - i > 1 && j - i <= 64 && x0 <= l + 0.5f && x1 >= r - 0.5f && y0 <= t + 0.5f && y1 >= bt - 0.5f && area >= 0.9f * (r - l) * (bt - t))
+        if (tiles > 1 && ((fabsf(x0 - l) <= 0.5f && fabsf(x1 - r) <= 0.5f) || strips == tiles))
             for (m = i; m < j; m++) g_p[m].keep = 1;
-        else if (j - i > 1 && j - i <= 64 && x0 < l - 0.5f && x1 > r + 0.5f)
-            for (m = i; m < j; m++) g_p[m].keep = 2;
+    }
+    /* runs of consecutive textured 2D tiles (one command word) reaching past both 4:3 edges belong to the scene, even
+       when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2) */
+    for (i = 0; i < np; i = j > i ? j : i + 1) {
+        float x0 = 1e30f, x1 = -1e30f;
+        for (j = i; j < np && g_p[j].flat && g_p[j].w & 4 && g_p[j].w == g_p[i].w; j++) {
+            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1);
+        }
+        if (j - i > 1 && x0 < l - 0.5f && x1 > r + 0.5f)
+            for (m = i; m < j; m++) if (!g_p[m].keep) g_p[m].keep = 2;
+    }
+    /* likewise all 2D primitives of a texture that together reach past both 4:3 edges (sky panoramas, spell
+       effects and their backdrops): squeezed but not cut (keep = 2). Menus sliding off reach past one edge only. */
+    memset(g_tex, 0, sizeof g_tex);
+    for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4) {
+        TexSpan *s = tex_span(g_p[j].tex);
+        if (s) { s->x0 = fminf(s->x0, g_p[j].x0); s->x1 = fmaxf(s->x1, g_p[j].x1); }
+    }
+    for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4 && !g_p[j].keep) {
+        TexSpan *s = tex_span(g_p[j].tex);
+        if (s && s->x0 < l - 0.5f && s->x1 > r + 0.5f) g_p[j].keep = 2;
+    }
+    /* a single large picture drawn to an edge of the 4:3 frame (a summon's first cloud, before the rest of its layer
+       is on screen): stretched too. UI windows are drawn as two-pass pairs (the world map's corner frames touch the
+       edges the same way) and are left alone. */
+    for (j = 0; j < np; j++) {
+        Prim *p = &g_p[j];
+        if (!p->keep && p->flat && p->w & 4 && !p->pair && (fabsf(p->x0 - l) <= 0.5f || fabsf(p->x1 - r) <= 0.5f) &&
+            p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.1f * (bt - t)) p->keep = 1;
+        /* single-pass semi-transparent pictures are effects (Blizzard's snow puffs drifting past one edge): squeezed
+           but not cut. Menu windows and their text are drawn opaque or as pairs. */
+        else if (!p->keep && p->flat && p->w & 4 && p->w & 0x20 && !p->pair) p->keep = 2;
     }
     for (j = 0; j < np; j++) {
         Prim *p = &g_p[j];

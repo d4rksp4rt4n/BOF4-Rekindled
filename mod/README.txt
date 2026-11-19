@@ -46,7 +46,8 @@ Options:
         grow=1         ; characters closer to the camera get bigger too (default 0)
   - Widescreen (EXPERIMENTAL, off by default): at a 16:9 resolution the game stretches its
     4:3 picture. With this, the proportions stay right and the 3D scene fills the sides
-    (bof4_reverb.dll); menus, text, the HUD and movies stay in the centred 4:3 area. Choose the
+    (bof4_reverb.dll); menus, text and the HUD stay in the centred 4:3 area, movies keep
+    their own aspect (a 16:9 replacement video fills the screen). Choose the
     resolution in the game: Camp -> Settings -> Screen adjust (e.g. 1920 x 1080). At a 4:3
     resolution nothing changes. Please report anything cut off at the sides, with a screenshot.
 
