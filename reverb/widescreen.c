@@ -17,6 +17,9 @@
  *    edge would otherwise show up in the side bars; except runs of tiles reaching past both edges (sky panoramas such
  *    as the plains', spell effects such as Gigaflare, Blizzard's backdrop) and single-pass semi-transparent pictures
  *    (effects such as Blizzard's snow), which only get squeezed;
+ *  - a big backdrop in pieces (big opaque tiles in one row covering the 4:3 width, such as the Breath attacks' skies
+ *    and Kaiser Breath's Earth) is fitted: squeezed only as far as it still covers the screen, and slid to close a
+ *    gap, so a panning or zooming picture never jumps between squeezed and stretched;
  *  - viewports (the command list can switch to a sub-rectangle) are squeezed with their contents, unless they
  *    span the whole width.
  * At 4:3 (or narrower) nothing changes. The batch is restored after the replay. */
@@ -63,12 +66,12 @@ static void clip(Vtx *p, int n, float cl, float cr) {
     }
 }
 
-typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1; u8 flat, keep, pair; } Prim;
+typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1, fk, fs; u8 flat, keep, pair; } Prim;
 static Prim *g_p; static int g_cap_p;
 
 /* per frame: texture -> x range of its 2D primitives (open addressing; a full table just means "not found") */
 #define TEX_SLOTS 2048
-typedef struct { u32 tex; float x0, x1; } TexSpan;
+typedef struct { u32 tex; float x0, x1; int n, edge; } TexSpan;
 static TexSpan g_tex[TEX_SLOTS];
 static TexSpan *tex_span(u32 tex) {
     u32 h = (tex * 2654435761u) >> 21, i;                       /* 11 bits */
@@ -78,6 +81,12 @@ static TexSpan *tex_span(u32 tex) {
         if (!s->tex) { s->tex = tex + 1; s->x0 = 1e30f; s->x1 = -1e30f; return s; }
     }
     return NULL;
+}
+
+/* a tile of a sky picture: a quarter of the screen wide and high, and on screen vertically (a ground mesh drawn with
+   the same command word has huge pieces below the screen) */
+static int big_tile(const Prim *p, float l, float r, float t, float bt) {
+    return p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.25f * (bt - t) && p->y0 < bt && p->y1 > t;
 }
 
 static int grow(void **p, int *cap, int n, int size) {
@@ -125,8 +134,9 @@ void wide_exec(void *surf, int *rect, int flag) {
                                      small 0x2000 quads are sparkles and get squeezed like the rest */
         }
     }
-    /* a layer made for the 4:3 frame: a run of consecutive textured 2D tiles (one command word) spanning exactly the
-       4:3 width (backdrops, summon skies, cloud layers whose art ends at the edges), like a single full-width quad:
+    /* a layer made for the 4:3 frame: a run of consecutive textured 2D tiles (one command word) covering the 4:3 width
+       and starting or ending exactly at its edge (backdrops, summon skies, cloud layers whose art ends at the edges, a
+       sky scrolled from the left edge such as Meteor Strike's), like a single full-width quad:
        keep = 1, stretched with the screen. Full-width quads in the run don't count (they are kept already): the title
        screen draws its logo and text in one run with its full-screen background, and they stay 4:3. No menu draws
        such a layer (checked on the title, Camp and Settings screens).
@@ -143,6 +153,38 @@ void wide_exec(void *surf, int *rect, int flag) {
         if (tiles > 1 && ((fabsf(x0 - l) <= 0.5f && fabsf(x1 - r) <= 0.5f) || strips == tiles))
             for (m = i; m < j; m++) g_p[m].keep = 1;
     }
+    /* a big picture in pieces: big opaque tiles (a quarter of the screen each way, on screen) in one row (same top and
+       bottom) that join without gaps and cover the 4:3 width, wherever they are in the command list (other layers can
+       be drawn between them: Kaiser Breath's Earth has a translucent copy after each half; MetaStrike's sky follows the
+       ground's small pieces). Fitted (keep = 3): squeezed as far as it can be while still as wide as the screen, then
+       moved just enough to cover it. A wide panorama (the plains) is simply squeezed; a picture made for the 4:3 view,
+       scrolled or zoomed (Meteor Strike's and MetaStrike's skies, Kaiser Breath's Earth), is squeezed less and slid
+       to the edge it would leave bare. Both amounts change smoothly while the picture pans or zooms, so it never jumps
+       between squeezed and stretched. Other 2D in the same row inside the picture (the Earth's translucent copies)
+       moves with it. An effect's mesh of small pieces that touches an edge (Gigaflare's shock wave) has no big
+       tiles. */
+    for (i = 0; i < np; i++) {
+        Prim *p = &g_p[i];
+        float bx0 = 1e30f, bx1 = -1e30f, sum = 0;
+        float fk, fa, fb, fs;
+        int n = 0;
+        if (p->keep || !p->flat || !(p->w & 4) || p->w & 0x20 || !big_tile(p, l, r, t, bt)) continue;
+        for (j = 0; j < np; j++) {
+            Prim *q = &g_p[j];
+            if (q->keep || !q->flat || !(q->w & 4) || q->w & 0x20 || !big_tile(q, l, r, t, bt) ||
+                fabsf(q->y0 - p->y0) > 0.5f || fabsf(q->y1 - p->y1) > 0.5f) continue;
+            bx0 = fminf(bx0, q->x0); bx1 = fmaxf(bx1, q->x1); sum += q->x1 - q->x0; n++;
+        }
+        if (n < 2 || sum < bx1 - bx0 - 1 || bx0 > l + 0.5f || bx1 < r - 0.5f) continue;
+        fk = fmaxf(k, (r - l) / (bx1 - bx0));
+        fa = cx + (bx0 - cx) * fk; fb = cx + (bx1 - cx) * fk;
+        fs = fa > l ? l - fa : fb < r ? r - fb : 0;
+        for (j = 0; j < np; j++) {
+            Prim *q = &g_p[j];
+            if (!q->keep && q->flat && q->w & 4 && fabsf(q->y0 - p->y0) <= 0.5f && fabsf(q->y1 - p->y1) <= 0.5f &&
+                q->x0 >= bx0 - 0.5f && q->x1 <= bx1 + 0.5f) { q->keep = 3; q->fk = fk; q->fs = fs; }
+        }
+    }
     /* runs of consecutive textured 2D tiles (one command word) reaching past both 4:3 edges belong to the scene, even
        when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2) */
     for (i = 0; i < np; i = j > i ? j : i + 1) {
@@ -158,19 +200,23 @@ void wide_exec(void *surf, int *rect, int flag) {
     memset(g_tex, 0, sizeof g_tex);
     for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4) {
         TexSpan *s = tex_span(g_p[j].tex);
-        if (s) { s->x0 = fminf(s->x0, g_p[j].x0); s->x1 = fmaxf(s->x1, g_p[j].x1); }
+        if (s) { s->x0 = fminf(s->x0, g_p[j].x0); s->x1 = fmaxf(s->x1, g_p[j].x1); s->n++;
+                 s->edge += fabsf(g_p[j].x0 - l) <= 0.5f || fabsf(g_p[j].x1 - r) <= 0.5f; }
     }
     for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4 && !g_p[j].keep) {
         TexSpan *s = tex_span(g_p[j].tex);
         if (s && s->x0 < l - 0.5f && s->x1 > r + 0.5f) g_p[j].keep = 2;
     }
     /* a single large picture drawn to an edge of the 4:3 frame (a summon's first cloud, before the rest of its layer
-       is on screen): stretched too. UI windows are drawn as two-pass pairs (the world map's corner frames touch the
-       edges the same way) and are left alone. */
+       is on screen): stretched too, when every piece of its texture touches an edge (a picture drifting across the
+       edge, such as Flood Tide's light, ends on it for a few frames while its other copy does not). UI windows are
+       drawn as two-pass pairs (the world map's corner frames touch the edges the same way) and are left alone. */
     for (j = 0; j < np; j++) {
         Prim *p = &g_p[j];
+        TexSpan *s;
         if (!p->keep && p->flat && p->w & 4 && !p->pair && (fabsf(p->x0 - l) <= 0.5f || fabsf(p->x1 - r) <= 0.5f) &&
-            p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.1f * (bt - t)) p->keep = 1;
+            p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.1f * (bt - t) &&
+            (s = tex_span(p->tex)) && s->edge == s->n) p->keep = 1;
         /* single-pass semi-transparent pictures are effects (Blizzard's snow puffs drifting past one edge): squeezed
            but not cut. Menu windows and their text are drawn opaque or as pairs. */
         else if (!p->keep && p->flat && p->w & 4 && p->w & 0x20 && !p->pair) p->keep = 2;
@@ -179,6 +225,7 @@ void wide_exec(void *surf, int *rect, int flag) {
         Prim *p = &g_p[j];
         int untex = !(p->w & 4);
         if (p->keep == 1) continue;
+        if (p->keep == 3) { for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * p->fk + p->fs; continue; }
         for (i = p->v0; i < p->v0 + p->n; i++)
             if (!(p->flat && untex && (v[i].x <= l + 0.5f || v[i].x >= r - 0.5f))) v[i].x = cx + (v[i].x - cx) * k;
         if (p->flat && !untex && !p->keep && fabsf(v[p->v0].z - UI_Z) < 1e-6f)

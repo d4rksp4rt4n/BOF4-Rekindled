@@ -68,7 +68,7 @@ did, where you were in the game, and, if possible, a save file.
 | Music loops | Many songs checked by ear and sample-exact in game; not every song in every area has been heard. Report any song whose loop sounds off (jump, gap, replayed intro), with the area |
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
-| **Widescreen** | **Experimental.** Tested at 1920×1080 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, several summons), the fishing minigame, the Sand Flier race, the plains, menus and the intro movie, also together with 60 fps and sprite depth scaling. Known limits: the HUD and on-screen panels keep their 4:3 positions, so some (the fishing panels) show in the side areas; on wide flat maps (the plains) the ground can end just short of the horizon at the far sides. Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
+| **Widescreen** | **Experimental.** Tested at 1920×1080 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, all summons, the dragon Breath attacks), the fishing minigame, the Sand Flier race, the plains, menus and the intro movie, also together with 60 fps and sprite depth scaling. Known limits: the HUD and on-screen panels keep their 4:3 positions, so some (the fishing panels) show in the side areas; on wide flat maps (the plains) the ground can end just short of the horizon at the far sides; the game's own draw distance shows more at the far corners (the Sand Flier race's distant walls and grass pop in at the sides too); some sprites still vanish at the 4:3 edge (the fish in Flood Tide). Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
 | No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Report rooms that still swim, or characters whose size looks wrong or jumps |
 | **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
 
@@ -167,7 +167,9 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 - **Widescreen** (`reverb\widescreen.c`): the game scales the PS1's 320×240 picture to the chosen resolution, so at
   16:9 everything is a third too wide. Right before each frame is drawn, the DLL squeezes it back to 4:3 proportions
   around the centre; the 3D scene then fills the sides. For that the exe draws what the PS1 left out:
-  - the polygon culls (`x + 16 < 352`, `y + 16 < 272`) get a 112-pixel margin on every side (about 20:9);
+  - the polygon culls (`x + 16 < 352`, `y + 16 < 272`) get a 112-pixel margin left and top (about 20:9) and a
+    much wider one right and bottom, so a polygon reaching past both sides of the screen (a tall pillar) still
+    passes by its far corners;
   - maps draw only the blocks within a radius of the camera focus (14 × 8 blocks by default, a diamond on some maps);
     the radius is doubled, both for the list of block rows and for the per-block test;
   - map polygons beyond the depth-sorting table's last slot go into that slot instead of being dropped.
@@ -175,7 +177,10 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
   Full-screen fades, the battle swirl (a capture of the screen), dark masks (the world map's vignette, the
   targeting scope) and pictures made for the 4:3 frame (the Sand Flier race's backdrop, summon and spell skies,
   cloud layers) are stretched to cover the whole screen; sky panoramas and spell effects wider than the screen (the
-  plains, Gigaflare, Blizzard) and drifting effects (Blizzard's snow) fill the sides; menus and text are cut at the 4:3 edge, as on a 4:3 screen. It
+  plains, Gigaflare, Blizzard) and drifting effects (Blizzard's snow) fill the sides. A big backdrop in pieces that
+  pans or zooms (the Breath attacks' skies, Kaiser Breath's Earth) is squeezed only as far as it still covers the
+  screen and slid to close any gap, so it never jumps between the two. Menus and text are cut at the 4:3 edge, as
+  on a 4:3 screen. It
   shares the 60 fps option's hook and works with or without it. Movies are drawn by their own routine, outside the
   frame, at the video's pixel size; the DLL fits them to the screen at the video's own aspect instead (a 4:3 movie
   gets black bars, a 16:9 replacement video of any resolution fills the screen).

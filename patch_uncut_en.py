@@ -488,7 +488,9 @@ def spr_code():
 # back to 4:3 proportions around the centre; the 3D scene then fills the sides (Hor+). That needs polygons the PS1
 # culled: the renderers drop a polygon whose projected corners all fail "(x + 16) < 352" (unsigned 16-bit, PS1
 # pixels, x in [-16, 336)). Each check is "add/lea r, [r + 0x10]" right before "cmp r16, 0x160"; both become
-# x + 112 < 544 (x in [-112, 432), about 20:9). The list below is every such check in the exe; the one other
+# x + 112 < 752 (x in [-112, 640): the left margin covers about 20:9, as far as the add's 8-bit immediate goes; the
+# right one is wider so a polygon reaching past both sides still passes by its right corners). The list below is
+# every such check in the exe; the one other
 # "cmp ?x, 0x160" (0x475D09) is a loop counter. One more on-screen test (0x50C7E0, a point in [-32, 352]) widens too.
 WIDE_CULLS = (                     # address of each cmp
     0x417F80, 0x417F9B, 0x417FB6, 0x417FD8, 0x4266FA, 0x426715, 0x426737, 0x426759,
@@ -499,7 +501,9 @@ WIDE_CULLS = (                     # address of each cmp
     0x6631DE, 0x66365E, 0x66367F, 0x66369F, 0x6636C0, 0x6660F0, 0x66610B, 0x66612D,
     0x66614F, 0x667340, 0x667362, 0x667384, 0x6673A6)
 # The same checks' y half, "(y + 16) < 272": a big polygon over a screen corner can have no corner inside both, so it
-# vanished from the far corners of a tilted view; its top margin becomes 112 too (y + 112 < 368, y in [-112, 256)).
+# vanished from the far corners of a tilted view; its top margin becomes 112 too, and the bottom goes to 480 (y + 112
+# < 592, y in [-112, 480)): a tall polygon reaching from above the screen to below it (a pillar beside the view in
+# Meteor Strike) otherwise has no corner inside and vanishes.
 # The add is "add r32, 0x10" or "add ax, 0x0010" right before "cmp r16, 0x110".
 WIDE_YCULLS = (
     0x417F8B, 0x417FA6, 0x417FC8, 0x417FE7, 0x426705, 0x426727, 0x426749, 0x426768, 0x439995, 0x4399B7, 0x4399D9,
@@ -589,7 +593,7 @@ def wide_culls(d):
         o = fo(va)
         cmp = [c for c in WIDE_CMP if d[o:o + len(c)] == c]
         assert len(cmp) == 1 and WIDE_ADD.get(bytes(d[o - 3:o])) == WIDE_CMP[cmp[0]], f"unexpected cull at {va:#x}"
-        out += [(o - 1, b"\x70"), (o + len(cmp[0]) - 2, struct.pack("<H", 0x220))]
+        out += [(o - 1, b"\x70"), (o + len(cmp[0]) - 2, struct.pack("<H", 0x70 + 640))]
     for va in WIDE_YCULLS:
         o = fo(va)
         if d[o:o + 4] == b"\x66\x3d\x10\x01": n, reg = 4, 0                      # cmp ax, 0x110
@@ -601,7 +605,7 @@ def wide_culls(d):
         else:
             assert d[o - 3] == 0x83 and d[o - 2] == 0xc0 + reg and d[o - 1] == 0x10, f"unexpected y cull at {va:#x}"
             imm = o - 1                                                              # add r32, 0x10
-        out += [(imm, b"\x70"), (o + n - 2, struct.pack("<H", 0x170))]
+        out += [(imm, b"\x70"), (o + n - 2, struct.pack("<H", 0x70 + 480))]
     for va, orig, new in WIDE_CODE:
         assert d[fo(va):fo(va) + len(orig)] == orig, f"unexpected code at {va:#x}"
         out.append((fo(va), new))
