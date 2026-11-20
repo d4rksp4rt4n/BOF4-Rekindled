@@ -13,7 +13,9 @@
  *  - nor are full-height 2D primitives flagged 0x2000: the previous screen redrawn from a capture texture (the battle
  *    swirl, two half-screen quads), which already holds the full widescreen picture;
  *  - untextured 2D keeps the corners it has at or beyond the left/right edge: masks reach the screen edges (the world
- *    map's vignette, the battle target scope, wipes);
+ *    map's vignette, the battle target scope, wipes, a spell's dark fade). Semi-transparent untextured 2D is
+ *    squeezed whole unless it is that wide fade (a quarter of the screen, a corner on the edge): the Shrine's laser
+ *    beams and lamp glows, drawn in 2D, would bend or flicker there (their corners land on the edge now and then);
  *  - textured plain 2D (rhw 1, z 0.01) is cut to the 4:3 area, as a 4:3 screen would: menus sliding off past its
  *    edge would otherwise show up in the side bars; except runs of tiles reaching past both edges (sky panoramas such
  *    as the plains', spell effects such as Gigaflare, Blizzard's backdrop) and single-pass semi-transparent pictures
@@ -35,10 +37,18 @@
 
 typedef unsigned char u8; typedef unsigned int u32;
 #define MEM(t, a) (*(t *)(size_t)(a))
-#define VTX_BASE 0xA7C1D0
+/* the frame's vertex buffer and command list: the exe (widescreen part) reads their addresses from its variables
+   [vertex base][command base][pending vertex][pending command], switching to the pending ones at a frame start */
+#define BUF_VARS 0x6A7C60
+#define VTX_BASE MEM(u32, BUF_VARS)
 #define VTX_PTR  0x96DA70
-#define CMD_BASE 0xA758B8
+#define CMD_BASE MEM(u32, BUF_VARS + 4)
 #define CMD_PTR  0x96DA7C
+#define BIG_VTX  65536         /* the game's own: 8192 vertices and 2048 commands, too few once the sides are drawn */
+#define BIG_CMD  16384         /* (a busy town such as Synesta overflowed both into the game's variables) */
+#define POOL_VARS (BUF_VARS + 16) /* [pool 0][pool 1]: the map's polygon packets, 2048 of 84 bytes each by frame parity */
+#define BIG_POLY 8192          /* (Synesta overflowed them too, into the program number at 0xBAB408) */
+#define GAME_VTX 0xA7C1D0u     /* the game's own vertex buffer */
 #define EXEC     0x40A8A0      /* replays the batch: (surface, rect, flag) */
 #define MAX_VP   64
 #define UI_Z     0.01f         /* z of plain 2D (menus, text, HUD); 2D sorted into the 3D scene (map dots) has its own */
@@ -109,26 +119,28 @@ static int fishing(void) { return !memcmp((const void *)(size_t)FISH_DATA, FISH_
 
 /* Which HUD panels move, by screen. The main program number is 2 on maps (towns, fields, the world map, fishing
    spots), 1 while a map is entered, 6 while the camera turns, 4 during a talk or event on a map, 3 in the Camp menu
-   (whose first and last frames still show the map, before its full-screen background is drawn), 5 in battle. */
+   (whose first and last frames still show the map, before its full-screen background is drawn), 5 in battle, 7 in
+   a shop's menu (its first and last frames still show the compass). */
 #define PROG_ID    0xBAB408
-#define CAMP_MENU  0xB56667
 enum { HUD_ALL = 1, HUD_BOTTOM = 2, HUD_TOPLEFT = 4, HUD_TOPRIGHT = 8 };
 static int hud_mode(int menu_bg) {
     int prog = MEM(u8, PROG_ID);
     if (fishing()) return HUD_ALL;                               /* compass, location name, Cast/Menu/Help panel */
     if (prog == 5) return HUD_TOPRIGHT | HUD_TOPLEFT;            /* battle: the Enemy(s) box; the map's compass */
-    if (((prog == 1 || prog == 2 || prog == 6) && !MEM(u8, CAMP_MENU)) || (prog == 3 && !menu_bg))
+    if ((prog == 1 || prog == 2 || prog == 6 || prog == 3) && !menu_bg)   /* not behind the Camp background */
         return HUD_TOPLEFT | HUD_BOTTOM;     /* maps: the compass of towns and fields, the world map's bottom panels */
-    if (prog == 4) return HUD_TOPLEFT;       /* talking: the compass; dialogue and choice boxes stay */
+    if (prog == 4 || prog == 7) return HUD_TOPLEFT;  /* talking, shops: the compass; dialogue, choices, shop stay */
     return 0;
 }
 
 /* a piece of the UI layer: plain 2D, or a two-pass frame on the sprite layer (rhw 0.1: the fishing panel's and the
-   Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand), not taken by a
+   Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand; on maps no
+   HUD is drawn there, and a chimney's smoke there would join the compass), not taken by a
    backdrop rule (single-pass translucent labels, such as battle's "Enemy(s)", are squeezed but not cut: keep 2) */
+static int g_spr;                                             /* sprite-layer frames count (fishing, battle) */
 static int ui_piece(const Prim *p, const Vtx *v) {
     return (!p->keep || p->keep == 2) && fabsf(v[p->v0].z - UI_Z) < 1e-6f &&
-           (p->flat || (p->pair && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
+           (p->flat || (g_spr && p->pair && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
 }
 
 /* HUD panels to the screen edges: windows (two-pass frames, or tiles flagged 0x4000) that touch or overlap are one
@@ -150,14 +162,25 @@ static int ui_piece(const Prim *p, const Vtx *v) {
 static int in_box(const Prim *p, const float *b, float m) {
     return p->x0 >= b[0] - m && p->x1 <= b[1] + m && p->y0 >= b[2] - m && p->y1 <= b[3] + m;
 }
-static int member(const Prim *p, const Vtx *v, const float *b, float m, int after) {
+static int upright(const Vtx *q, int n) {                  /* every corner on its bounding box's sides */
+    float x0 = q[0].x, x1 = q[0].x, y0 = q[0].y, y1 = q[0].y;
     int i;
+    for (i = 1; i < n; i++) { x0 = fminf(x0, q[i].x); x1 = fmaxf(x1, q[i].x); y0 = fminf(y0, q[i].y); y1 = fmaxf(y1, q[i].y); }
+    for (i = 0; i < n; i++)
+        if ((fabsf(q[i].x - x0) > 0.5f && fabsf(q[i].x - x1) > 0.5f) || (fabsf(q[i].y - y0) > 0.5f && fabsf(q[i].y - y1) > 0.5f))
+            return 0;
+    return 1;
+}
+static int member(const Prim *p, const Vtx *v, const float *b, float m, int after) {
     if (!ui_piece(p, v))                                         /* a sprite of another layer: wholly inside */
         return after && p->flat && p->w & 4 && (!p->keep || p->keep == 2) && in_box(p, b, 0);
-    if (!(p->w & 4))                                             /* untextured: only a rectangle */
-        for (i = p->v0; i < p->v0 + p->n; i++)
-            if ((fabsf(v[i].x - p->x0) > 0.5f && fabsf(v[i].x - p->x1) > 0.5f) ||
-                (fabsf(v[i].y - p->y0) > 0.5f && fabsf(v[i].y - p->y1) > 0.5f)) return 0;
+    if (!(p->w & 4) && p->w & 0x20 && p->x1 - p->x0 < 0.5f * m)   /* (m: 2% of the width) a see-through speck: */
+        return 0;                                                 /* spray (the waterfall's, over the compass) */
+    if ((!(p->w & 4) || p->keep == 2) && !upright(v + p->v0, p->n))  /* untextured or translucent: only a rectangle
+                                              (not the vignette, nor North Chamba's fog of diamond tiles over the water) */
+        return 0;
+    if (!after && !upright(v + p->v0, p->n))    /* slanted and drawn before the panel: the scene (the Tomb's ghost */
+        return 0;                               /* blocks); the compass needle comes after its box */
     return in_box(p, b, m);
 }
 #define MAX_PANEL 2048                                       /* windows per frame (the Settings screen has 600) */
@@ -169,11 +192,16 @@ static int g_cnt[MAX_PANEL], *g_gi, g_gi_cap;                 /* plain 2D pieces
 static int grow(void **p, int *cap, int n, int size);
 static int root(int a) { while (g_par[a] != a) a = g_par[a] = g_par[g_par[a]]; return a; }
 static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, float bt, float cx, float k, int sel) {
-    float m = 0.02f * (r - l), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
+    float m = (g_spr = (sel & (HUD_ALL | HUD_TOPRIGHT)) != 0, 0.02f * (r - l)), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
     int n = 0, i, j;
     for (j = 0; j < np && n < MAX_PANEL; j++)
-        if (ui_piece(&pw[j], v) && !(pw[j].w & 0x2000) && pw[j].w & 4 && (pw[j].pair || pw[j].w & 0x4000 ||
-            (sel != HUD_ALL && pw[j].flat && pw[j].x1 - pw[j].x0 >= 0.03f * (r - l) && pw[j].y1 - pw[j].y0 >= 0.03f * h))) {
+        if (ui_piece(&pw[j], v) && !(pw[j].w & 0x2000) && pw[j].w & 4 &&
+            !(pw[j].pair && pw[j].w & 0x20 && (pw[j].x1 - pw[j].x0 > 0.1f * (r - l) || pw[j].x0 < l ||  /* not a */
+                pw[j].x1 > r || pw[j].y0 < t || pw[j].y1 > bt)) &&      /* two-pass puff of mist (the waterfall's) */
+            (pw[j].pair || pw[j].w & 0x4000 ||
+            (sel != HUD_ALL && pw[j].flat && pw[j].x1 - pw[j].x0 >= 0.03f * (r - l) && pw[j].y1 - pw[j].y0 >= 0.03f * h &&
+             pw[j].x0 >= l && pw[j].x1 <= r && pw[j].y0 >= t && pw[j].y1 <= bt &&    /* on screen: not a sky tile, */
+             upright(v + pw[j].v0, pw[j].n)))) {                 /* upright: not the Tomb's ghost blocks */
             g_pi[n] = j; g_par[n] = n; n++;
         }
     for (i = 0; i < n; i++)
@@ -200,9 +228,9 @@ static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, 
             for (i = 0; i < n; i++) {                            /* the smallest window it lies in */
                 const Prim *c = &pw[g_pi[i]];
                 float cb[4] = { c->x0, c->x1, c->y0, c->y1 }, a = (c->x1 - c->x0) * (c->y1 - c->y0);
-                if (a < best && member(p, v, cb, m, 1)) { best = a; b = g_bx[root(i)]; }
+                if (a < best && member(p, v, cb, m, j > g_first[root(i)])) { best = a; b = g_bx[root(i)]; }
             }
-            for (i = 0; i < n && !b; i++)                        /* else the smallest panel outline (a box's dark */
+            for (i = 0; i < n && !b && upright(v + p->v0, p->n); i++) /* else the smallest panel outline (a box's dark */
                 if (root(i) == i && member(p, v, g_bx[i], m, 1)) {   /* fill, across its tiles) */
                     float a = (g_bx[i][1] - g_bx[i][0]) * (g_bx[i][3] - g_bx[i][2]);
                     int k2;
@@ -244,12 +272,38 @@ static int grow(void **p, int *cap, int n, int size) {
     *p = q; *cap = n; return 1;
 }
 
+static void *low_alloc(u32 n) {                     /* memory below 16 MB, where the game's 24-bit packet links reach */
+    MEMORY_BASIC_INFORMATION m;
+    u32 a = 0x10000;
+    while (a < 0x1000000 && VirtualQuery((void *)(size_t)a, &m, sizeof m)) {
+        u32 b = ((u32)(size_t)m.BaseAddress + 0xFFFF) & ~0xFFFFu, e = (u32)(size_t)m.BaseAddress + (u32)m.RegionSize;
+        void *p;
+        if (m.State == MEM_FREE && b + n <= e && b + n <= 0x1000000 &&
+            (p = VirtualAlloc((void *)(size_t)b, n, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))) return p;
+        a = e;
+    }
+    return 0;
+}
+
 void wide_exec(void *surf, int *rect, int flag) {
+    static int bufs;
     float l = (float)rect[0], r = (float)rect[2], t = (float)rect[1], bt = (float)rect[3], cx = (l + r) * 0.5f, k;
     int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m, menu_bg = 0;
     u32 c = CMD_BASE, end = MEM(u32, CMD_PTR);
     Vtx *v = (Vtx *)VTX_BASE;
     k = r > l ? 4.0f / 3 * (bt - t) / (r - l) : 1;
+    if (!bufs) {                                                /* bigger frame buffers from the next frame on */
+        void *vb = VirtualAlloc(0, BIG_VTX * sizeof(Vtx), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        void *cb = VirtualAlloc(0, BIG_CMD * 8, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        bufs = 1;
+        if (vb && cb) { MEM(u32, BUF_VARS + 12) = (u32)(size_t)cb; MEM(u32, BUF_VARS + 8) = (u32)(size_t)vb; }
+    }
+    if (bufs == 1 && VTX_BASE != GAME_VTX) {                   /* bigger polygon pools once the game's vertex buffer is free */
+        void *p0 = low_alloc(BIG_POLY * 0x54), *p1 = low_alloc(BIG_POLY * 0x54);
+        bufs = 2;     /* else: the game's vertex buffer (3120 polygons) and both old pools as one (4096) */
+        MEM(u32, POOL_VARS) = p0 ? (u32)(size_t)p0 : GAME_VTX;
+        MEM(u32, POOL_VARS + 4) = p1 ? (u32)(size_t)p1 : 0xB57400;
+    }
     if (k > 0.999f || nv <= 0 || nv > 1 << 18 || end < CMD_BASE || end - CMD_BASE > 1 << 20 ||
         !grow((void **)&g_bak, &g_cap, nv, sizeof(Vtx)) || !grow((void **)&g_p, &g_cap_p, (end - CMD_BASE) / 8 + 1, sizeof(Prim))) {
         exec(surf, rect, flag); return;
@@ -276,7 +330,8 @@ void wide_exec(void *surf, int *rect, int flag) {
                 if (v[i].y < p->y0) p->y0 = v[i].y; if (v[i].y > p->y1) p->y1 = v[i].y;
                 if (v[i].rhw != 1.0f) p->flat = 0;
             }
-            p->keep = p->flat && ((p->x0 <= l + 0.5f && p->x1 >= r - 0.5f) ||      /* full width */
+            p->keep = p->flat && ((p->x0 <= l + 0.5f && p->x1 >= r - (r - l) / 320 - 0.5f) ||   /* full width (to a
+                                     PS1 pixel: the plains' haze over the far ground is 319 wide) */
                                   (p->w & 0x2000 && p->y0 <= t + 0.05f * (bt - t) && p->y1 >= bt - 0.05f * (bt - t)));
                                   /* 0x2000 at full height: the screen redrawn from a capture (the battle swirl);
                                      small 0x2000 quads are sparkles and get squeezed like the rest */
@@ -337,14 +392,28 @@ void wide_exec(void *surf, int *rect, int flag) {
         }
     }
     /* runs of consecutive textured 2D tiles (one command word) reaching past both 4:3 edges belong to the scene, even
-       when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2) */
+       when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2). Except a floor
+       drawn in 2D in perspective (the plains' far ground below the sky: a fan of trapezoids whose top edge, at the
+       horizon, spans exactly the 4:3 width): squeezed, its top would leave the 16:9 corners bare, so it is stretched
+       with the screen (keep = 1). */
     for (i = 0; i < np; i = j > i ? j : i + 1) {
         float x0 = 1e30f, x1 = -1e30f;
+        int q, o;
         for (j = i; j < np && g_p[j].flat && g_p[j].w & 4 && g_p[j].w == g_p[i].w; j++) {
             x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1);
         }
         if (j - i > 1 && x0 < l - 0.5f && x1 > r + 0.5f)
-            for (m = i; m < j; m++) if (!g_p[m].keep) g_p[m].keep = 2;
+            for (m = i; m < j; m++) {                            /* row by row (same top and bottom) */
+                float tx0 = 1e30f, tx1 = -1e30f, y0 = g_p[m].y0, y1 = g_p[m].y1;
+                if (g_p[m].keep) continue;
+                for (o = m; o < j; o++)
+                    if (!g_p[o].keep && fabsf(g_p[o].y0 - y0) <= 0.5f && fabsf(g_p[o].y1 - y1) <= 0.5f)
+                        for (q = g_p[o].v0; q < g_p[o].v0 + g_p[o].n; q++)
+                            if (fabsf(v[q].y - y0) <= 0.5f) { tx0 = fminf(tx0, v[q].x); tx1 = fmaxf(tx1, v[q].x); }
+                for (o = m; o < j; o++)
+                    if (!g_p[o].keep && fabsf(g_p[o].y0 - y0) <= 0.5f && fabsf(g_p[o].y1 - y1) <= 0.5f)
+                        g_p[o].keep = fabsf(tx0 - l) <= 0.5f && fabsf(tx1 - r) <= 0.5f ? 1 : 2;
+            }
     }
     /* likewise all 2D primitives of a texture that together reach past both 4:3 edges (sky panoramas, spell
        effects and their backdrops): squeezed but not cut (keep = 2). Menus sliding off reach past one edge only. */
@@ -378,15 +447,20 @@ void wide_exec(void *surf, int *rect, int flag) {
         int untex = !(p->w & 4);
         if (p->keep == 1) continue;
         if (p->keep == 3) { for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * p->fk + p->fs; continue; }
+        if (p->flat && untex && p->w & 0x20)    /* see-through: a mask only when wide with a corner on the edge (a */
+            for (i = p->v0, untex = 0; i < p->v0 + p->n; i++)  /* fade; a beam's or a glow's corner lands there too) */
+                untex |= p->x1 - p->x0 >= 0.25f * (r - l) && (fabsf(v[i].x - l) <= 0.5f || fabsf(v[i].x - r) <= 0.5f);
         for (i = p->v0; i < p->v0 + p->n; i++)
             if (!(p->flat && untex && (v[i].x <= l + 0.5f || v[i].x >= r - 0.5f))) v[i].x = cx + (v[i].x - cx) * k;
+        untex = !(p->w & 4);
         if (p->push != 0) {                                     /* HUD at the screen edges: cut there instead */
             for (i = p->v0; i < p->v0 + p->n; i++) v[i].x += p->push;
             if (p->flat && !untex) clip(v + p->v0, p->n, l, r);
             continue;
         }
-        if (p->flat && !untex && !p->keep && fabsf(v[p->v0].z - UI_Z) < 1e-6f)
-            clip(v + p->v0, p->n, cx - (cx - l) * k, cx + (r - cx) * k);
+        if (p->flat && !untex && !p->keep && fabsf(v[p->v0].z - UI_Z) < 1e-6f && upright(v + p->v0, p->n))
+            clip(v + p->v0, p->n, cx - (cx - l) * k, cx + (r - cx) * k);   /* (a slanted face is the scene: the
+                                                                          Tomb's ghost blocks, drawn in 2D) */
     }
     exec(surf, rect, flag);
     memcpy(v, g_bak, (size_t)nv * sizeof(Vtx));

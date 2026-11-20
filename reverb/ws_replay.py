@@ -15,7 +15,7 @@ HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static unsigned int g_vtx_mem[(1 << 18) * 8], g_vtx_end, g_cmd_mem[1 << 18], g_cmd_end;
+static unsigned int g_vtx_mem[(1 << 18) * 8], g_vtx_end, g_cmd_mem[1 << 18], g_cmd_end, g_bufvars[6];
 static int g_n_prim, g_pv0[1 << 16], g_pn[1 << 16];
 static unsigned char g_fish_mem[16], g_state[3];          /* program number, block mode, Camp menu flag */
 static void on_exec(void);
@@ -53,6 +53,7 @@ int main(void) {
                 v[nv].z = z; v[nv].rhw = rhw; v[nv].col = 0; v[nv].spec = 0; v[nv].u = u; v[nv].v = vv;
             }
         }
+        g_bufvars[0] = (unsigned int)(size_t)g_vtx_mem; g_bufvars[1] = (unsigned int)(size_t)g_cmd_mem;
         g_vtx_end = (unsigned int)(size_t)(v + nv); g_cmd_end = (unsigned int)(size_t)(g_cmd_mem + nc);
         printf("F\n");
         wide_exec(0, rect, 0);
@@ -69,9 +70,12 @@ def sub(s, a, b):
 def build(src_text, name):
     d = os.path.join(OUT, name); os.makedirs(d, exist_ok=True)
     s = src_text.replace("\r\n", "\n")
-    s = sub(s, "#define VTX_BASE 0xA7C1D0", "#define VTX_BASE ((u32)(size_t)g_vtx_mem)")
+    if "#define BUF_VARS 0x6A7C60" in s:                     # the buffers' addresses in the exe's variables
+        s = sub(s, "#define BUF_VARS 0x6A7C60", "#define BUF_VARS ((size_t)g_bufvars)")
+    else:
+        s = sub(s, "#define VTX_BASE 0xA7C1D0", "#define VTX_BASE ((u32)(size_t)g_vtx_mem)")
+        s = sub(s, "#define CMD_BASE 0xA758B8", "#define CMD_BASE ((u32)(size_t)g_cmd_mem)")
     s = sub(s, "#define VTX_PTR  0x96DA70", "#define VTX_PTR  ((size_t)&g_vtx_end)")
-    s = sub(s, "#define CMD_BASE 0xA758B8", "#define CMD_BASE ((u32)(size_t)g_cmd_mem)")
     s = sub(s, "#define CMD_PTR  0x96DA7C", "#define CMD_PTR  ((size_t)&g_cmd_end)")
     s = sub(s, "{ ((void (__cdecl *)(void *, int *, int))EXEC)(surf, rect, flag); }", "{ on_exec(); }")
     s = s.replace("#define FISH_DATA 0x6B0000", "#define FISH_DATA ((size_t)g_fish_mem)")   # older versions have none

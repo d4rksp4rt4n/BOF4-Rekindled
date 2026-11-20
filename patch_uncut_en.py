@@ -547,6 +547,52 @@ OTZ = 0xB52FE8
 OTZ_SITES = (0x42685A, 0x5F3311, 0x65F47B, 0x660122, 0x66134C, 0x662707, 0x6632DF, 0x666250, 0x6674A7)
 OTZ_CMP = b"\x66\x81\x3d" + struct.pack("<I", OTZ) + b"\x00\x04"         # cmp word [OTZ], 0x400 (then jae)
 
+# Frame buffers: every frame is built in a vertex buffer of 8192 D3DTLVERTEX (0xA7C1D0) and a command list of 2048
+# entries (0xA758B8), with no bounds check and the game's own variables right after each (0xABC1D0..: the D3D device,
+# the draw routine index at 0xABC234). The 4:3 view never filled them; with the sides drawn, a busy town (Synesta)
+# overflows both and the game calls a null pointer and closes. The code that uses their addresses (9 + 5 places) reads
+# them from variables instead ([vertex base][command base] at BUFS, initially the original buffers); the DLL puts
+# bigger buffers in [pending vertex][pending command], and the frame start (where both pointers are reset) switches.
+# The map renderers' PS1 packets (84 bytes per polygon, [0xB52FEC] the next one) go in two pools of 2048 at 0xB57400
+# and 0xB81400 (by frame parity), again unchecked and right before the game's variables (0xBAB408: the program
+# number). The pool start (0x65E9B1: shl ecx, 13; add ecx, 0xB57400; ecx = parity * 21) comes from [pool 0][pool 1]
+# after the buffer variables instead; the DLL puts bigger pools there. They must lie below 16 MB (packets link by
+# 24-bit address), where the game leaves no big free block, so they are the game's own vertex buffer once the bigger
+# one is in use (3120 polygons) and both old pools as one (4096); Synesta's busiest view needs about 2250.
+BUFS = 0x6A7C60                    # after the music stub, same .text padding
+POOL_SITE, POOL0, POOL1 = 0x65E9B1, 0xB57400, 0xB81400
+POOL_ORIG = H("c1e10d81c1") + struct.pack("<I", POOL0)
+VTX_BUF, CMD_BUF = 0xA7C1D0, 0xA758B8
+BUF_RESETS = (0x4029CC, 0x40B3DC)  # mov [cmd ptr], CMD_BUF; mov [vtx ptr], VTX_BUF (10 + 10 bytes)
+BUF_RESET_ORIG = (H("c7057cda9600") + struct.pack("<I", CMD_BUF) + H("c70570da9600") + struct.pack("<I", VTX_BUF))
+VTX_LOADS = (0x4042F3, 0x404366, 0x40AB59, 0x40ABD0, 0x40B1BD, 0x40B202)    # mov eax, VTX_BUF
+VTX_ESP28, CMD_EBP, CMD_ESP34, CMD_CMP = 0x40A91E, 0x40A917, 0x40A92E, 0x40AB2F
+
+def bufs_code():
+    """Returns (code at BUFS, reset stub, esp28 stub, ebp stub, esp34 stub, cmp stub, pool stub)."""
+    a32 = lambda v: struct.pack("<I", v)
+    vb, cb, pv, pc, p0, p1 = BUFS, BUFS + 4, BUFS + 8, BUFS + 12, BUFS + 16, BUFS + 20
+    c = bytearray(a32(VTX_BUF) + a32(CMD_BUF) + bytes(8) + a32(POOL0) + a32(POOL1))
+    here = lambda: BUFS + len(c)
+    reset = here()
+    c += b"\x50" + b"\xa1" + a32(pv) + b"\x85\xc0"                      # push eax; mov eax, [pv]; test eax, eax
+    j = len(c); c += b"\x74\x00"                                        # jz keep
+    c += b"\xa3" + a32(vb) + b"\xa1" + a32(pc) + b"\xa3" + a32(cb)       # vb = pv; cb = pc
+    c += b"\x31\xc0" + b"\xa3" + a32(pv)                                # pv = 0
+    c[j + 1] = len(c) - (j + 2)
+    c += b"\xa1" + a32(cb) + b"\xa3" + a32(0x96DA7C)                    # keep: cmd ptr = cb
+    c += b"\xa1" + a32(vb) + b"\xa3" + a32(0x96DA70) + b"\x58\xc3"      # vtx ptr = vb; pop eax; ret
+    esp28 = here()                                                      # [esp+0x28] = vb (no flags touched)
+    c += b"\x50\xa1" + a32(vb) + H("89442430") + b"\x58\xc3"
+    ebp = here(); c += b"\x8b\x2d" + a32(cb) + b"\xc3"                  # mov ebp, [cb]
+    esp34 = here()                                                      # [esp+0x34] = cb + 8 (lea: flags kept)
+    c += b"\x50\xa1" + a32(cb) + H("8d4008") + H("8944243c") + b"\x58\xc3"
+    cmp = here(); c += b"\x3b\x05" + a32(cb) + b"\xc3"                  # cmp eax, [cb]
+    pool = here()                                                       # ecx = ecx ? [p1] : [p0]
+    c += H("85c98b0d") + a32(p0) + H("74068b0d") + a32(p1) + b"\xc3"
+    assert BUFS + len(c) <= FPS
+    return bytes(c), reset, esp28, ebp, esp34, cmp, pool
+
 def window_code():
     """Returns (code, otz stub address, span stub address, movie stub address)."""
     c = bytearray(b"\xe8" + rel(WIDE_WINDOW + 5, WINDOW_FN))
@@ -682,7 +728,24 @@ def patch_exe(d, parts=EXE_PARTS):
         d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] = b"\xe8" + rel(SPAN_SITE + 5, span) + b"\x90" * 8
         for site in MOVIE_SITES:
             d[fo(site):fo(site) + len(MOVIE_ORIG)] = b"\xe8" + rel(site + 5, movie) + b"\x90" * 6
-        make_text_writable(d)                              # the movie stub keeps a value in the cave
+        bc, reset, esp28, ebp, esp34, cmp, pool = bufs_code()   # frame buffers through variables (bigger from the DLL)
+        assert d[fo(BUFS):fo(BUFS) + len(bc)] == bytes(len(bc)), "frame buffer cave not free"
+        d[fo(BUFS):fo(BUFS) + len(bc)] = bc
+        for site in BUF_RESETS:
+            assert d[fo(site):fo(site) + 20] == BUF_RESET_ORIG, f"unexpected code at {site:#x}"
+            d[fo(site):fo(site) + 20] = b"\xe8" + rel(site + 5, reset) + b"\x90" * 15
+        for site in VTX_LOADS:
+            assert d[fo(site):fo(site) + 5] == b"\xb8" + struct.pack("<I", VTX_BUF), f"unexpected code at {site:#x}"
+            d[fo(site):fo(site) + 5] = b"\xa1" + struct.pack("<I", BUFS)
+        for site, orig, stub in ((VTX_ESP28, H("c7442428") + struct.pack("<I", VTX_BUF), esp28),
+                                 (CMD_EBP, b"\xbd" + struct.pack("<I", CMD_BUF), ebp),
+                                 (CMD_ESP34, H("c7442434") + struct.pack("<I", CMD_BUF + 8), esp34),
+                                 (CMD_CMP, b"\x3d" + struct.pack("<I", CMD_BUF), cmp)):
+            assert d[fo(site):fo(site) + len(orig)] == orig, f"unexpected code at {site:#x}"
+            d[fo(site):fo(site) + len(orig)] = b"\xe8" + rel(site + 5, stub) + b"\x90" * (len(orig) - 5)
+        assert d[fo(POOL_SITE):fo(POOL_SITE) + 9] == POOL_ORIG, f"unexpected code at {POOL_SITE:#x}"
+        d[fo(POOL_SITE):fo(POOL_SITE) + 9] = b"\xe8" + rel(POOL_SITE + 5, pool) + b"\x90" * 4
+        make_text_writable(d)                              # the movie stub and the frame buffer variables live in the cave
     sc, stubs = spr_code()
     assert SPR >= FPS + len(fc) and SPR + len(sc) <= 0x6A8000
     for site, fn, _ in SPR_SITES:

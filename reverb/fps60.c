@@ -32,9 +32,15 @@
 
 typedef unsigned char u8; typedef unsigned int u32;
 
+#ifdef FPS_TEST
 #define VTX_BASE 0xA7C1D0
-#define VTX_PTR  0x96DA70
 #define CMD_BASE 0xA758B8
+#else                          /* with widescreen the exe reads the buffers' addresses from variables (widescreen.c) */
+#define BUF_VARS 0x6A7C60
+#define VTX_BASE (MEM(u8, FEATURES) & 2 ? MEM(u32, BUF_VARS) : 0xA7C1D0u)
+#define CMD_BASE (MEM(u8, FEATURES) & 2 ? MEM(u32, BUF_VARS + 4) : 0xA758B8u)
+#endif
+#define VTX_PTR  0x96DA70
 #define CMD_PTR  0x96DA7C
 #define CAMERA   0xBAD7F4      /* MATRIX: short R[3][3], pad, long T[3] at +0x14 */
 #define GTE_H    0xAE9C30
