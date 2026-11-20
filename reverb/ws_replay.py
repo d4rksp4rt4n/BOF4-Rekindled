@@ -17,6 +17,7 @@ HARNESS = r"""
 #include <string.h>
 static unsigned int g_vtx_mem[(1 << 18) * 8], g_vtx_end, g_cmd_mem[1 << 18], g_cmd_end;
 static int g_n_prim, g_pv0[1 << 16], g_pn[1 << 16];
+static unsigned char g_fish_mem[16], g_state[3];          /* program number, block mode, Camp menu flag */
 static void on_exec(void);
 #include "ws_src.c"
 static void on_exec(void) {
@@ -27,10 +28,14 @@ static void on_exec(void) {
         printf("%d %.1f %.1f\n", g_p[j].keep, x0, x1);
     }
 }
-/* stdin: per frame "F l t r b nprim", then per primitive "w tex n rhw z u v x y x y ..." or "VP x y w h" */
+/* stdin: per frame "F l t r b nprim fishing prog blockmode camp", then per primitive "w tex n rhw z u v x y x y ..." or "VP x y w h" */
 int main(void) {
-    int rect[4], np, j, i, nv, nc;
-    while (scanf(" F %d %d %d %d %d", &rect[0], &rect[1], &rect[2], &rect[3], &np) == 5) {
+    int rect[4], np, j, i, nv, nc, fish, st[3];
+    while (scanf(" F %d %d %d %d %d %d %d %d %d", &rect[0], &rect[1], &rect[2], &rect[3], &np, &fish, &st[0], &st[1], &st[2]) == 9) {
+        g_state[0] = (unsigned char)st[0]; g_state[1] = (unsigned char)st[1]; g_state[2] = (unsigned char)st[2];
+#ifdef FISH_DATA
+        if (fish) memcpy(g_fish_mem, FISH_SIG, sizeof g_fish_mem); else memset(g_fish_mem, 0, sizeof g_fish_mem);
+#endif
         Vtx *v = (Vtx *)g_vtx_mem; nv = nc = g_n_prim = 0;
         for (j = 0; j < np; j++) {
             char k[16]; unsigned int w, tex; int n; float rhw, z, u, vv;
@@ -69,6 +74,10 @@ def build(src_text, name):
     s = sub(s, "#define CMD_BASE 0xA758B8", "#define CMD_BASE ((u32)(size_t)g_cmd_mem)")
     s = sub(s, "#define CMD_PTR  0x96DA7C", "#define CMD_PTR  ((size_t)&g_cmd_end)")
     s = sub(s, "{ ((void (__cdecl *)(void *, int *, int))EXEC)(surf, rect, flag); }", "{ on_exec(); }")
+    s = s.replace("#define FISH_DATA 0x6B0000", "#define FISH_DATA ((size_t)g_fish_mem)")   # older versions have none
+    s = s.replace("#define PROG_ID    0xBAB408", "#define PROG_ID    ((size_t)&g_state[0])")
+    s = s.replace("#define BLOCK_MODE 0xB5300D", "#define BLOCK_MODE ((size_t)&g_state[1])")
+    s = s.replace("#define CAMP_MENU  0xB56667", "#define CAMP_MENU  ((size_t)&g_state[2])")
     open(os.path.join(d, "ws_src.c"), "w").write(s)
     open(os.path.join(d, "replay.c"), "w").write(HARNESS)
     bat = os.path.join(d, "b.bat")
@@ -83,8 +92,15 @@ PL = re.compile(r"P (\S+) tex (\S+) n (\d) rhw (\S+) z (\S+) x \S+ y \S+ col \S+
 def frames(path):
     """-> (stdin text for the harness, list of (w, tex) per primitive) for one dump file"""
     rect, items, ids, pend = None, [], [], None
+    # fishing minigame active: a "fishing 1" line (newer dumps) or a file named "fishing" in the dump folder;
+    # screen state "program blockmode camp": a "state" line (newer dumps) or a file named "state" holding it
+    fish = os.path.exists(os.path.join(os.path.dirname(path), "fishing"))
+    sf = os.path.join(os.path.dirname(path), "state")
+    state = open(sf).read().split()[:3] if os.path.exists(sf) else ["0", "0", "0"]
     for l in open(path):
         if l.startswith("rect "): rect = l.split()[1:5]
+        elif l.startswith("fishing "): fish = l.split()[1] == "1"
+        elif l.startswith("state "): state = l.split()[1:4]
         elif l.startswith("VP "): items.append(l.strip())
         elif l.startswith("P "):
             m = PL.match(l); pend = m.groups()
@@ -94,7 +110,7 @@ def frames(path):
             w, tex, n, rhw, z, u, v = pend
             items.append("%s %s %s %s %s %s %s %s" % (w, tex, n, rhw, z, u, v, xy)); ids.append((w, tex)); pend = None
     if not rect: return None, None
-    return "F %s %d\n%s\n" % (" ".join(rect), len(items), "\n".join(items)), ids
+    return "F %s %d %d %s\n%s\n" % (" ".join(rect), len(items), fish, " ".join(state), "\n".join(items)), ids
 
 def run(exe, inputs):
     r = subprocess.run([exe], input="".join(inputs), capture_output=True, text=True)

@@ -9,6 +9,7 @@
  *  - 2D primitives covering the whole width (fades, flashes, letterbox bars) are not squeezed, nor are runs of
  *    textured 2D tiles that together span exactly the 4:3 width (backdrops such as the Sand Flier
  *    race's, summon skies, cloud layers drawn for the 4:3 frame): they are stretched with the screen;
+ *  - nor is a full-screen picture on the sprite layer (rhw 0.1: the Camp menu's background);
  *  - nor are full-height 2D primitives flagged 0x2000: the previous screen redrawn from a capture texture (the battle
  *    swirl, two half-screen quads), which already holds the full widescreen picture;
  *  - untextured 2D keeps the corners it has at or beyond the left/right edge: masks reach the screen edges (the world
@@ -20,6 +21,10 @@
  *  - a big backdrop in pieces (big opaque tiles in one row covering the 4:3 width, such as the Breath attacks' skies
  *    and Kaiser Breath's Earth) is fitted: squeezed only as far as it still covers the screen, and slid to close a
  *    gap, so a panning or zooming picture never jumps between squeezed and stretched;
+ *  - HUD panels (with their text and icons) move to the screen edges: all of them in the fishing minigame (but its
+ *    depth gauge, whose marker is drawn apart from it, at the bottom right), the
+ *    bottom ones on maps (the world map's Menu panel and road box), top-left ones (the compass in towns and
+ *    fields), the Enemy(s) box in battle;
  *  - viewports (the command list can switch to a sub-rectangle) are squeezed with their contents, unless they
  *    span the whole width.
  * At 4:3 (or narrower) nothing changes. The batch is restored after the replay. */
@@ -66,7 +71,7 @@ static void clip(Vtx *p, int n, float cl, float cr) {
     }
 }
 
-typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1, fk, fs; u8 flat, keep, pair; } Prim;
+typedef struct { u32 w, tex; int v0, n; float x0, x1, y0, y1, fk, fs, push; u8 flat, keep, pair; } Prim;
 static Prim *g_p; static int g_cap_p;
 
 /* per frame: texture -> x range of its 2D primitives (open addressing; a full table just means "not found") */
@@ -83,10 +88,153 @@ static TexSpan *tex_span(u32 tex) {
     return NULL;
 }
 
-/* a tile of a sky picture: a quarter of the screen wide and high, and on screen vertically (a ground mesh drawn with
-   the same command word has huge pieces below the screen) */
-static int big_tile(const Prim *p, float l, float r, float t, float bt) {
-    return p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.25f * (bt - t) && p->y0 < bt && p->y1 > t;
+/* a tile of a sky picture: a quarter of the screen wide and high, on screen vertically (a ground mesh drawn with the
+   same command word has huge pieces below the screen), and a plain rectangle (Mudflow's ground is a grid of skewed
+   2D quads, some as big: fitting a few rows of it opened square holes between them) */
+static int big_tile(const Prim *p, const Vtx *v, float l, float r, float t, float bt) {
+    int i;
+    if (!(p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.25f * (bt - t) && p->y0 < bt && p->y1 > t)) return 0;
+    for (i = p->v0; i < p->v0 + p->n; i++)
+        if ((fabsf(v[i].x - p->x0) > 0.5f && fabsf(v[i].x - p->x1) > 0.5f) ||
+            (fabsf(v[i].y - p->y0) > 0.5f && fabsf(v[i].y - p->y1) > 0.5f)) return 0;
+    return 1;
+}
+
+/* The fishing minigame's HUD (compass, location name, the Cast/Menu/Help panel) sits at the edges of the 4:3 frame;
+   on a wide screen it moves to the screen edges. The PS1 game loads each mode's data at 0x6B0000; the fishing
+   minigame's starts with this table (the same at every fishing spot, never on a map, in battle or in menus). */
+#define FISH_DATA 0x6B0000
+static const u8 FISH_SIG[16] = { 0x20, 0x03, 0x20, 0x03, 0x43, 0x03, 0x60, 0x03, 0x71, 0x03, 0x92, 0x03, 0xAC, 0x03, 0xC8, 0x03 };
+static int fishing(void) { return !memcmp((const void *)(size_t)FISH_DATA, FISH_SIG, sizeof FISH_SIG); }
+
+/* Which HUD panels move, by screen. The main program number is 2 on maps (towns, fields, the world map, fishing
+   spots), 1 while a map is entered, 6 while the camera turns, 4 during a talk or event on a map, 3 in the Camp menu
+   (whose first and last frames still show the map, before its full-screen background is drawn), 5 in battle. */
+#define PROG_ID    0xBAB408
+#define CAMP_MENU  0xB56667
+enum { HUD_ALL = 1, HUD_BOTTOM = 2, HUD_TOPLEFT = 4, HUD_TOPRIGHT = 8 };
+static int hud_mode(int menu_bg) {
+    int prog = MEM(u8, PROG_ID);
+    if (fishing()) return HUD_ALL;                               /* compass, location name, Cast/Menu/Help panel */
+    if (prog == 5) return HUD_TOPRIGHT | HUD_TOPLEFT;            /* battle: the Enemy(s) box; the map's compass */
+    if (((prog == 1 || prog == 2 || prog == 6) && !MEM(u8, CAMP_MENU)) || (prog == 3 && !menu_bg))
+        return HUD_TOPLEFT | HUD_BOTTOM;     /* maps: the compass of towns and fields, the world map's bottom panels */
+    if (prog == 4) return HUD_TOPLEFT;       /* talking: the compass; dialogue and choice boxes stay */
+    return 0;
+}
+
+/* a piece of the UI layer: plain 2D, or a two-pass frame on the sprite layer (rhw 0.1: the fishing panel's and the
+   Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand), not taken by a
+   backdrop rule (single-pass translucent labels, such as battle's "Enemy(s)", are squeezed but not cut: keep 2) */
+static int ui_piece(const Prim *p, const Vtx *v) {
+    return (!p->keep || p->keep == 2) && fabsf(v[p->v0].z - UI_Z) < 1e-6f &&
+           (p->flat || (p->pair && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
+}
+
+/* HUD panels to the screen edges: windows (two-pass frames, or tiles flagged 0x4000) that touch or overlap are one
+   panel (neighbouring panels a few pixels apart, such as battle's Enemy(s) and turn boxes, stay separate); a panel
+   left of the centre moves left by the width of the side bar, one right of it moves right, one across the centre (a
+   message box) stays. Every UI piece lying within a panel (its text and icons) moves with it, as does a sprite lying
+   wholly inside one and drawn after it (the world map's road arrows, on the map's sprite layer, unlike the roads
+   drawn before the HUD); untextured pieces only when they
+   are rectangles (a box's dark fill). Anything else stays: the hero's sprite, the fishing line, the black shapes of a
+   screen wipe or of the world map's vignette that happen to lie over a panel.
+   Outside the fishing minigame only the panels of some regions move (sel: bottom, top-left, top-right), and any
+   textured box of some size counts as a window too (the world map's empty road boxes). A UI piece follows the
+   panel of the smallest window it lies in (text overlaps its box, so it is part of the box's panel), not the
+   outline of a merged panel: battle's submenu joins the command menu and turn box into one L-shaped panel whose
+   outline covers the Enemy(s) box. A sprite (the road arrows, between the road boxes) uses the outline.
+   Spell sparkles and screen captures (flagged 0x2000) are never windows, nor are sprites on the UI layer by size
+   alone (the party running past the compass in a field), and a top-left panel only moves when it has
+   a two-pass window frame (the compass), not for a cloud of a summon drawn there. */
+static int in_box(const Prim *p, const float *b, float m) {
+    return p->x0 >= b[0] - m && p->x1 <= b[1] + m && p->y0 >= b[2] - m && p->y1 <= b[3] + m;
+}
+static int member(const Prim *p, const Vtx *v, const float *b, float m, int after) {
+    int i;
+    if (!ui_piece(p, v))                                         /* a sprite of another layer: wholly inside */
+        return after && p->flat && p->w & 4 && (!p->keep || p->keep == 2) && in_box(p, b, 0);
+    if (!(p->w & 4))                                             /* untextured: only a rectangle */
+        for (i = p->v0; i < p->v0 + p->n; i++)
+            if ((fabsf(v[i].x - p->x0) > 0.5f && fabsf(v[i].x - p->x1) > 0.5f) ||
+                (fabsf(v[i].y - p->y0) > 0.5f && fabsf(v[i].y - p->y1) > 0.5f)) return 0;
+    return in_box(p, b, m);
+}
+#define MAX_PANEL 2048                                       /* windows per frame (the Settings screen has 600) */
+static int g_par[MAX_PANEL], g_pi[MAX_PANEL];
+static float g_bx[MAX_PANEL][4];
+static int g_first[MAX_PANEL];                                /* first container of each panel, in drawing order */
+static u8 g_frame[MAX_PANEL];                                 /* the panel has a two-pass window frame */
+static int g_cnt[MAX_PANEL], *g_gi, g_gi_cap;                 /* plain 2D pieces per panel; panel of each piece */
+static int grow(void **p, int *cap, int n, int size);
+static int root(int a) { while (g_par[a] != a) a = g_par[a] = g_par[g_par[a]]; return a; }
+static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, float bt, float cx, float k, int sel) {
+    float m = 0.02f * (r - l), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
+    int n = 0, i, j;
+    for (j = 0; j < np && n < MAX_PANEL; j++)
+        if (ui_piece(&pw[j], v) && !(pw[j].w & 0x2000) && pw[j].w & 4 && (pw[j].pair || pw[j].w & 0x4000 ||
+            (sel != HUD_ALL && pw[j].flat && pw[j].x1 - pw[j].x0 >= 0.03f * (r - l) && pw[j].y1 - pw[j].y0 >= 0.03f * h))) {
+            g_pi[n] = j; g_par[n] = n; n++;
+        }
+    for (i = 0; i < n; i++)
+        for (j = i + 1; j < n; j++) {
+            const Prim *a = &pw[g_pi[i]], *b = &pw[g_pi[j]];
+            if (a->x0 - mj <= b->x1 && b->x0 - mj <= a->x1 && a->y0 - mj <= b->y1 && b->y0 - mj <= a->y1)
+                g_par[root(i)] = root(j);
+        }
+    for (i = 0; i < n; i++) { g_bx[i][0] = g_bx[i][2] = 1e30f; g_bx[i][1] = g_bx[i][3] = -1e30f; g_first[i] = np; g_frame[i] = 0; }
+    for (i = 0; i < n; i++) {
+        const Prim *a = &pw[g_pi[i]];
+        float *b = g_bx[root(i)];
+        b[0] = fminf(b[0], a->x0); b[1] = fmaxf(b[1], a->x1); b[2] = fminf(b[2], a->y0); b[3] = fmaxf(b[3], a->y1);
+        if (g_pi[i] < g_first[root(i)]) g_first[root(i)] = g_pi[i];
+        if (a->pair && !a->keep) g_frame[root(i)] = 1;
+    }
+    if (!grow((void **)&g_gi, &g_gi_cap, np, sizeof(int))) return;
+    for (i = 0; i < n; i++) g_cnt[i] = 0;
+    for (j = 0; j < np; j++) {                                /* the panel of each piece */
+        Prim *p = &pw[j];
+        const float *b = NULL;
+        float best = 1e30f;
+        if (ui_piece(p, v)) {
+            for (i = 0; i < n; i++) {                            /* the smallest window it lies in */
+                const Prim *c = &pw[g_pi[i]];
+                float cb[4] = { c->x0, c->x1, c->y0, c->y1 }, a = (c->x1 - c->x0) * (c->y1 - c->y0);
+                if (a < best && member(p, v, cb, m, 1)) { best = a; b = g_bx[root(i)]; }
+            }
+            for (i = 0; i < n && !b; i++)                        /* else the smallest panel outline (a box's dark */
+                if (root(i) == i && member(p, v, g_bx[i], m, 1)) {   /* fill, across its tiles) */
+                    float a = (g_bx[i][1] - g_bx[i][0]) * (g_bx[i][3] - g_bx[i][2]);
+                    int k2;
+                    const float *c = g_bx[i];
+                    for (k2 = i + 1; k2 < n; k2++)
+                        if (root(k2) == k2 && member(p, v, g_bx[k2], m, 1) &&
+                            (g_bx[k2][1] - g_bx[k2][0]) * (g_bx[k2][3] - g_bx[k2][2]) < a) {
+                            a = (g_bx[k2][1] - g_bx[k2][0]) * (g_bx[k2][3] - g_bx[k2][2]); c = g_bx[k2];
+                        }
+                    b = c;
+                }
+        } else
+            for (i = 0; i < n && !b; i++)                        /* a sprite: inside a panel's outline */
+                if (root(i) == i && member(p, v, g_bx[i], m, j > g_first[i])) b = g_bx[i];
+        g_gi[j] = b ? (int)((b - g_bx[0]) / 4) : -1;
+        if (b && p->flat && p->w & 4) g_cnt[g_gi[j]]++;       /* textured plain 2D pieces per panel */
+    }
+    for (j = 0; j < np; j++) {
+        int g = g_gi[j];
+        const float *b;
+        if (g < 0) continue;
+        b = g_bx[g];
+        /* fishing: all panels but the depth gauge (bottom right; its marker is drawn apart from it) and those with
+           at most two textured plain 2D pieces: a bare frame (the box around the hero while reeling, drawn around his
+           spot in the scene) and the scene's sprites on the sprite layer (dragonflies, splashes and their untextured
+           droplets), even when they touch */
+        if ((sel & HUD_ALL && !(b[2] >= t + 0.6f * h && b[0] >= cx) && g_cnt[g] > 2) ||
+            (sel & HUD_BOTTOM && b[2] >= t + 0.6f * h) ||
+            (sel & HUD_TOPLEFT && b[3] <= t + 0.25f * h && b[1] <= cx && g_frame[g]) ||
+            (sel & HUD_TOPRIGHT && b[3] <= t + 0.25f * h && b[0] >= cx))
+            pw[j].push = b[1] <= cx ? -dl : b[0] >= cx ? dr : 0;
+    }
 }
 
 static int grow(void **p, int *cap, int n, int size) {
@@ -98,7 +246,7 @@ static int grow(void **p, int *cap, int n, int size) {
 
 void wide_exec(void *surf, int *rect, int flag) {
     float l = (float)rect[0], r = (float)rect[2], t = (float)rect[1], bt = (float)rect[3], cx = (l + r) * 0.5f, k;
-    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m;
+    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m, menu_bg = 0;
     u32 c = CMD_BASE, end = MEM(u32, CMD_PTR);
     Vtx *v = (Vtx *)VTX_BASE;
     k = r > l ? 4.0f / 3 * (bt - t) / (r - l) : 1;
@@ -121,7 +269,7 @@ void wide_exec(void *surf, int *rect, int flag) {
         if (vi + n * draws > nv) break;                          /* inconsistent batch: leave the rest */
         for (d = 0; d < draws; d++, vi += n, c += 8) {           /* a second draw has its own entry and vertices */
             Prim *p = &g_p[np++];
-            p->w = MEM(u32, c); p->tex = MEM(u32, c + 4); p->v0 = vi; p->n = n; p->flat = 1; p->pair = draws == 2;
+            p->w = MEM(u32, c); p->tex = MEM(u32, c + 4); p->v0 = vi; p->n = n; p->flat = 1; p->pair = draws == 2; p->push = 0;
             p->x0 = p->y0 = 1e30f; p->x1 = p->y1 = -1e30f;
             for (i = vi; i < vi + n; i++) {
                 if (v[i].x < p->x0) p->x0 = v[i].x; if (v[i].x > p->x1) p->x1 = v[i].x;
@@ -132,6 +280,9 @@ void wide_exec(void *surf, int *rect, int flag) {
                                   (p->w & 0x2000 && p->y0 <= t + 0.05f * (bt - t) && p->y1 >= bt - 0.05f * (bt - t)));
                                   /* 0x2000 at full height: the screen redrawn from a capture (the battle swirl);
                                      small 0x2000 quads are sparkles and get squeezed like the rest */
+            /* a picture on the sprite layer (rhw 0.1) covering the whole screen: the Camp menu's background */
+            if (!p->flat && p->w & 4 && fabsf(v[vi].rhw - 0.1f) < 1e-6f && p->x0 <= l + 0.5f && p->x1 >= r - 0.5f &&
+                p->y0 <= t + 0.5f && p->y1 >= bt - 0.5f) p->keep = 1, menu_bg = 1;
         }
     }
     /* a layer made for the 4:3 frame: a run of consecutive textured 2D tiles (one command word) covering the 4:3 width
@@ -168,10 +319,10 @@ void wide_exec(void *surf, int *rect, int flag) {
         float bx0 = 1e30f, bx1 = -1e30f, sum = 0;
         float fk, fa, fb, fs;
         int n = 0;
-        if (p->keep || !p->flat || !(p->w & 4) || p->w & 0x20 || !big_tile(p, l, r, t, bt)) continue;
+        if (p->keep || !p->flat || !(p->w & 4) || p->w & 0x20 || !big_tile(p, v, l, r, t, bt)) continue;
         for (j = 0; j < np; j++) {
             Prim *q = &g_p[j];
-            if (q->keep || !q->flat || !(q->w & 4) || q->w & 0x20 || !big_tile(q, l, r, t, bt) ||
+            if (q->keep || !q->flat || !(q->w & 4) || q->w & 0x20 || !big_tile(q, v, l, r, t, bt) ||
                 fabsf(q->y0 - p->y0) > 0.5f || fabsf(q->y1 - p->y1) > 0.5f) continue;
             bx0 = fminf(bx0, q->x0); bx1 = fmaxf(bx1, q->x1); sum += q->x1 - q->x0; n++;
         }
@@ -221,6 +372,7 @@ void wide_exec(void *surf, int *rect, int flag) {
            but not cut. Menu windows and their text are drawn opaque or as pairs. */
         else if (!p->keep && p->flat && p->w & 4 && p->w & 0x20 && !p->pair) p->keep = 2;
     }
+    if ((m = hud_mode(menu_bg)) != 0) hud_push(g_p, np, v, l, r, t, bt, cx, k, m);
     for (j = 0; j < np; j++) {
         Prim *p = &g_p[j];
         int untex = !(p->w & 4);
@@ -228,6 +380,11 @@ void wide_exec(void *surf, int *rect, int flag) {
         if (p->keep == 3) { for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * p->fk + p->fs; continue; }
         for (i = p->v0; i < p->v0 + p->n; i++)
             if (!(p->flat && untex && (v[i].x <= l + 0.5f || v[i].x >= r - 0.5f))) v[i].x = cx + (v[i].x - cx) * k;
+        if (p->push != 0) {                                     /* HUD at the screen edges: cut there instead */
+            for (i = p->v0; i < p->v0 + p->n; i++) v[i].x += p->push;
+            if (p->flat && !untex) clip(v + p->v0, p->n, l, r);
+            continue;
+        }
         if (p->flat && !untex && !p->keep && fabsf(v[p->v0].z - UI_Z) < 1e-6f)
             clip(v + p->v0, p->n, cx - (cx - l) * k, cx + (r - cx) * k);
     }
