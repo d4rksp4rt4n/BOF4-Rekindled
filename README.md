@@ -17,6 +17,8 @@ option can be switched on or off, and "Restore original files" undoes everything
 | No PS1 wobble | In rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
 | Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Off by default; Insert switches between shrink only, full perspective and off while playing |
 | Widescreen (experimental) | At a 16:9 resolution the game stretches its 4:3 picture to the full width. This keeps the proportions right and shows more of the 3D scene at the sides instead; menus, text and the HUD stay in the centred 4:3 area, and movies play in 4:3 with black bars. Choose the resolution in the game: Camp → Settings → Screen adjust. Off by default |
+| Controller Start/Back (experimental) | A controller's Start and Back (View/Select) buttons work as the PS1's Start and Select. The PC port leaves them on the stick clicks and its Key/Pad Setting screen can't move them. A new key setup also puts the camera on LB/RB and Change Rank on the right stick click. Off by default |
+| Xbox / PlayStation button icons (experimental) | The game names controller buttons with circled numbers ①–⑩, on the Key/Pad Setting screen and in help text ("①: Confirm"). These show the button itself instead: A, B, X, Y, LB, RB, View, Menu, LS, RS, or ✕, ○, □, △, L1, R1, Select, Start, L3, R3. One set at a time. Off by default |
 
 ## For players
 
@@ -54,6 +56,9 @@ Notes:
   ```
   Insert cycles shrink only, full and off while playing, starting from this setting; the window title shows
   the current mode.
+- **Controller Start/Back with an existing key setup:** the fix works with any `bof4.cfg`, but if your
+  Key/Pad Setting has the camera (or anything else) on Back or Start, those buttons do both. Move it in
+  Camp → Setting → Key/Pad Setting, e.g. the camera to LB/RB. Only a new `bof4.cfg` gets the new defaults.
 
 ## Status – testing wanted
 
@@ -69,6 +74,7 @@ did, where you were in the game, and, if possible, a save file.
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
 | **Widescreen** | **Experimental.** Tested at 1920×1080 and 3840×2160 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, all summons, the dragon Breath attacks), the fishing minigame, the Sand Flier race, busy towns (Synesta), the plains, every map and field of the game (walked with random encounters off), shops, dungeons with 2D effects (the Shrine's lasers and lamps, the Tomb's ghost blocks, waterfall mist), menus and the intro movie, also together with 60 fps and sprite depth scaling. HUD at the screen edges: the fishing minigame's panels, the field compass, the world map's Menu panel and road box, battle's Enemy(s) box; other panels (menus, dialogue, the battle command menu and party status) keep their 4:3 positions. Known limits: the game's own draw distance shows more at the far corners (the Sand Flier race's distant walls and grass pop in at the sides too); some sprites still vanish at the 4:3 edge (the fish in Flood Tide). Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
+| **Controller Start/Back, button icons** | **New, experimental.** Icons checked in game on the Key/Pad Setting screen (both sets, normal and selected colours). Start/Back need testing with a real controller: Start at "Press Enter" and to pause, Back for the world map's travel menu and help. GOG's input wrapper reports pads in Xbox order, so other pads should show the right icons too; report a pad whose icons don't match its buttons |
 | No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
 | **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
 
@@ -112,6 +118,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `build_mod.py` | builds the installer (variants, diffs, art, C# compile) |
 | `patch_uncut_en.py` | the game patches: exe code caves, restored text, Dengeki Store, Identify. Its command line is an older local patcher |
 | `identify_icons.py` | the Identify screen's element icons (font glyphs, labels); run it for a preview image |
+| `button_icons.py` | Xbox/PlayStation button icons in place of the circled numbers (font glyphs); run it for a preview image |
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
 | `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
@@ -137,6 +144,14 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
   (`AB000_00`, `BTLEND`) become those characters, and the HP separator, which shared the unknown-item
   "?", becomes "/" (the hack's v1.1 fix). An unseen item's "?" marks are drawn 8 px apart instead of
   12, so long names stay inside the Treasure panel.
+- **Controller:** GOG's input wrapper reports every pad in Xbox order (button 1 = A ... 7 = Back,
+  8 = Start, 9/10 = stick clicks). The game ORs the `bof4.cfg` joystick entries into PS1 pad bits each frame;
+  a hook at the end of that loop also sets Start for button 8 and Select for button 7. The default joystick
+  table (used for a new `bof4.cfg`) moves the camera from 7/8 to LB/RB, Change Rank (L2) from 6 to RS, and
+  Start/Select from the stick clicks to 8/7.
+- **Button icons:** the circled numbers are font glyphs 0x5E–0x67 (text chars 0x7E–0x87, the PS1's button
+  symbol codes). `button_icons.py` redraws them inside the game's own ring at 8× and reduces them to the
+  font's 8 ink levels, so they take the text colours (red when selected) like letters.
 - **Music:** the PC version streams MP3s. A stub in the exe loads `bof4_reverb.dll`, which wraps the MP3
   decoder:
   - **Loops:** it jumps from each recording's loop end to its loop start, sample-exact, skipping the final

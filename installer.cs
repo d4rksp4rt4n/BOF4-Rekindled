@@ -75,12 +75,23 @@ class Installer : Form
         Controls.AddRange(new Control[] { banner, lf, folder, browse });
 
         y += 60;
+        var list = new Panel { Location = new Point(0, y) };     // scrolls when the window would not fit the screen
+        int ly = 0;
         foreach (var o in options)
         {
-            var cb = new CheckBox { Text = o[1], Checked = o.Length < 4 || o[3] != "off", Location = new Point(16, y), AutoSize = true,
+            var cb = new CheckBox { Text = o[1], Checked = o.Length < 4 || o[3] != "off", Location = new Point(16, ly), AutoSize = true,
                                     Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Tag = o[0] };
-            var desc = new Label { Text = o[2], Location = new Point(34, y + 22), Size = new Size(590, 18), ForeColor = Dim };
-            boxes.Add(cb); Controls.Add(cb); Controls.Add(desc); y += 46;
+            var desc = new Label { Text = o[2], Location = new Point(34, ly + 22), Size = new Size(590, 18), ForeColor = Dim };
+            boxes.Add(cb); list.Controls.Add(cb); list.Controls.Add(desc); ly += 46;
+        }
+        int room = Screen.FromPoint(Cursor.Position).WorkingArea.Height - 40 - (y + 6 + 48 + 110 + 16);
+        list.Size = new Size(640, Math.Min(ly, Math.Max(184, room)));
+        if (list.Height < ly) { list.HorizontalScroll.Maximum = 0; list.HorizontalScroll.Visible = false; list.AutoScroll = true; }
+        Controls.Add(list); y += list.Height;
+        foreach (var pair in new[] { new[] { "xbox", "ps" }, new[] { "ps", "xbox" } })   // one icon set at a time
+        {
+            var a = boxes.FirstOrDefault(b => (string)b.Tag == pair[0]); var b2 = boxes.FirstOrDefault(b => (string)b.Tag == pair[1]);
+            if (a != null && b2 != null) a.CheckedChanged += delegate { if (a.Checked) b2.Checked = false; };
         }
         var apply = MakeButton("Apply", Accent); apply.SetBounds(16, y + 6, 130, 32);
         apply.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);

@@ -6,6 +6,7 @@
 import base64, gzip, hashlib, itertools, os, subprocess, zipfile, zlib
 import config
 import patch_uncut_en as P
+import button_icons, identify_icons
 from steam.mem_list import mem_list
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +37,12 @@ OPTIONS = [  # id, label, description (shown in the installer)
      "Characters far from the camera shrink like the 3D around them instead of seeming to grow (bof4_reverb.dll).", "off"),
     ("widescreen", "Widescreen (experimental)",
      "At a 16:9 resolution the 3D fills the screen with correct proportions; menus stay 4:3 (bof4_reverb.dll).", "off"),
+    ("startback", "Controller Start/Back (experimental)",
+     "A pad's Start and Back work as Start and Select. A new key setup puts the camera on LB/RB.", "off"),
+    ("xbox", "Xbox button icons (experimental)",
+     "A, B, LB... instead of the circled numbers (Key/Pad screen, help text). Only one icon set at a time.", "off"),
+    ("ps", "PlayStation button icons (experimental)",
+     "Cross, circle, L1... instead of the circled numbers (Key/Pad screen, help text). Only one icon set at a time.", "off"),
 ]   # id, label, description[, "off" = unticked by default]
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
@@ -71,7 +78,7 @@ def bps(src, p):
 
 # ---------------------------------------------------------------- variants
 def build_variants():
-    """Yields (path, key, original, patched), key = tuple of option ids applied (one at a time: 2046 exe variants)."""
+    """Yields (path, key, original, patched), key = tuple of option ids applied (one at a time: 4094 exe variants)."""
     en = lambda f: open(os.path.join(config.CLEAN_DAT, f), "rb").read()
     exe = open(config.CLEAN_EXE, "rb").read()
     for n in range(1, len(P.EXE_PARTS) + 1):
@@ -92,6 +99,10 @@ def build_variants():
             yield ("bof4_reverb.dll", key, b"", dll)
     for f, patch in P.IDENTIFY_DATS.items():
         yield ("DAT\\" + f, ("identify",), en(f), patch(en(f)))
+    for k in button_icons.SETS:                                        # INIT.DAT font: icons, with or without Identify
+        icons = button_icons.patch_font(en("INIT.DAT"), k)
+        yield ("DAT\\INIT.DAT", (k,), en("INIT.DAT"), icons)
+        yield ("DAT\\INIT.DAT", ("identify", k), en("INIT.DAT"), identify_icons.patch_font(icons))
     z = zipfile.ZipFile(DESC_ZIP)
     for n in z.namelist():
         f = n.replace(".bps", ".DAT")

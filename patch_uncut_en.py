@@ -657,7 +657,27 @@ def wide_culls(d):
         out.append((fo(va), new))
     return out
 
-EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites", "widescreen")
+# Start/Back: GOG's input wrapper reports pads in Xbox order (Back = button 7, Start = 8), but the default joystick
+# table puts the camera (L1/R1) on 7/8 and Start/Select on 9/10 (the stick clicks), and the Key/Pad Setting screen
+# can't move Start or Select. The joystick loop (0x40E998, DIJOYSTATE at esp+0x20, pad bits in ebp) now also
+# turns Start into PS1 Start and Back into Select, whatever bof4.cfg says. The default table (used for a new
+# bof4.cfg) gets L1/R1 (camera) on LB/RB (5/6), L2 (Change Rank) on RS (10), and Start/Select on 8/7 like the hook.
+PAD_SITE = 0x40E9AC                # cmp eax, end of the joystick table (then jl: next entry)
+PAD_CMP = b"\x3d" + struct.pack("<I", 0xABC562)
+PAD = 0x6A7ED0                     # after the sprites stub, same .text padding
+PAD_DEFAULTS = 0x8D4A88 + 4 * 4    # default joystick table (button u16, bits u16): L1, R1, L2, R2, Start, Select
+PAD_DEFAULTS_ORIG = H("07000004" "08000008" "06000001" "0b000002" "09000800" "0a000100")
+PAD_DEFAULTS_NEW = H("05000004" "06000008" "0a000001" "0b000002" "08000800" "07000100")
+
+def pad_code():
+    c = PAD_CMP + b"\x7c\x14"                               # cmp eax, end; jl last (loop not done yet)
+    c += H("f644245b80" "7403" "83cd08")                    # button 8 (Start) held: or ebp, 0x8 (Start)
+    c += H("f644245a80" "7403" "83cd01")                    # button 7 (Back) held: or ebp, 0x1 (Select)
+    c += PAD_CMP + b"\xc3"                                  # last: the caller's jl needs the cmp flags; ret
+    return c
+
+EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites", "widescreen",
+             "startback")
 
 def patch_exe(d, parts=EXE_PARTS):
     d = bytearray(d)
@@ -760,6 +780,16 @@ def patch_exe(d, parts=EXE_PARTS):
         assert wobble_orig_ok(d, b), f"unexpected code at {b:#x}"
     if "wobble" in parts:
         for va, c in wobble_code(): d[fo(va):fo(va) + len(c)] = c
+    pc = pad_code()
+    assert PAD >= SPR + len(sc) and PAD + len(pc) <= WIDE_WINDOW
+    assert d[fo(PAD_SITE):fo(PAD_SITE) + 7] == PAD_CMP + b"\x7c\xe5", f"unexpected code at {PAD_SITE:#x}"
+    pd = PAD_DEFAULTS - DATA_VA + DATA_RAW
+    assert d[pd:pd + 24] == PAD_DEFAULTS_ORIG, "default joystick table not as expected"
+    if "startback" in parts:
+        assert d[fo(PAD):fo(PAD) + len(pc)] == bytes(len(pc)), "Start/Back cave not free"
+        d[fo(PAD):fo(PAD) + len(pc)] = pc
+        d[fo(PAD_SITE):fo(PAD_SITE) + 5] = b"\xe8" + rel(PAD_SITE + 5, PAD)
+        d[pd:pd + 24] = PAD_DEFAULTS_NEW
     lv = d.find(SCIAS_LEVELS)
     assert lv > 0 and d.count(SCIAS_LEVELS) == 1 and d[lv + 16] == 0, "Scias' level-up table not as expected"
     if "identify" in parts:

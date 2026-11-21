@@ -51,6 +51,16 @@ Options:
     their own aspect (a 16:9 replacement video fills the screen). Choose the
     resolution in the game: Camp -> Settings -> Screen adjust (e.g. 1920 x 1080). At a 4:3
     resolution nothing changes. Please report anything cut off at the sides, with a screenshot.
+  - Controller Start/Back (NEW, EXPERIMENTAL, off by default): a controller's Start and Back
+    (View) buttons work as the PS1's Start and Select (the PC port leaves them on the stick
+    clicks, and its Key/Pad Setting screen can't move them). A new key setup (no bof4.cfg yet)
+    also puts the camera on LB/RB and Change Rank on the right stick click. With an existing
+    setup that has the camera or anything else on Back/Start, those buttons do both: move it in
+    Camp -> Setting -> Key/Pad Setting.
+  - Xbox / PlayStation button icons (NEW, EXPERIMENTAL, off by default): the game names pad
+    buttons with circled numbers 1-10 on the Key/Pad Setting screen and in help text
+    ("1: Confirm"). These show the buttons instead: A, B, X, Y, LB, RB, View, Menu, LS, RS, or
+    cross, circle, square, triangle, L1, R1, Select, Start, L3, R3. One set at a time.
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
 Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected
@@ -76,7 +86,7 @@ aren't the original English GOG ones, e.g. if the German patch's DAT files are i
 
 Files changed: BOF4.exe (Steam: version.dll and BOF4_Uncut_EN.mem added instead), bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
 (store), INIT, AB000_00, BTLEND (Identify), AB000_00, CAMP, COMMU03, MASTER, MSHOP, SGAMEN, SHOP
-(descriptions).
+(descriptions), INIT (button icons).
 
 Credits
   - Restored scene scripts and English lines: navarchos' "Breath of Fire IV Uncensored" PS1 hack
