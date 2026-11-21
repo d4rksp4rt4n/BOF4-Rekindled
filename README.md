@@ -1,4 +1,6 @@
-# Breath of Fire IV – English Uncut & fixes (GOG PC)
+# BOF4 Rekindled – Breath of Fire IV uncut content, fixes and enhancements (GOG PC)
+
+*Formerly "Breath of Fire IV – English Uncut". Installs made with the old installer are picked up as they are.*
 
 A patcher for the English GOG release of *Breath of Fire IV* that restores content cut from the Western
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
@@ -26,9 +28,9 @@ The installer explains each option when you point at it.
 
 1. You need the English GOG version of Breath of Fire IV. The installer checks every file and refuses
    to change anything that isn't the original English GOG data.
-2. Download `BOF4_Uncut_EN.exe` from this repository's **Releases** page, put it next to `BOF4.exe`
+2. Download `BOF4_Rekindled.exe` from this repository's **Releases** page, put it next to `BOF4.exe`
    and run it. Switch on the options you want and press **Apply**.
-3. Originals are kept in `BOF4_Uncut_EN_backup`. Run the installer again any time to change options or
+3. Originals are kept in `BOF4_Rekindled_backup`. Run the installer again any time to change options or
    to restore the original files. On start it checks GitHub for a newer release and shows a link if
    there is one (nothing is downloaded or sent).
 
@@ -78,7 +80,7 @@ did, where you were in the game, and, if possible, a save file.
 | **Widescreen** | **Experimental.** Tested at 1920×1080 and 3840×2160 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, all summons, the dragon Breath attacks), the fishing minigame, the Sand Flier race, busy towns (Synesta), the plains, every map and field of the game (walked with random encounters off), shops, dungeons with 2D effects (the Shrine's lasers and lamps, the Tomb's ghost blocks, waterfall mist), menus and the intro movie, also together with 60 fps and sprite depth scaling. HUD at the screen edges: the fishing minigame's panels, the field compass, the world map's Menu panel and road box, battle's Enemy(s) box; other panels (menus, dialogue, the battle command menu and party status) keep their 4:3 positions. Known limits: the game's own draw distance shows more at the far corners (the Sand Flier race's distant walls and grass pop in at the sides too); some sprites still vanish at the 4:3 edge (the fish in Flood Tide). Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
 | **Controller Start/Back, button icons** | **New, experimental.** Icons checked in game on the Key/Pad Setting screen (both sets, normal and selected colours). Start/Back tested with an Xbox-order controller. Controller button hints tested with a real controller (Xbox set): the world map's Menu panels, battle's Menu and Enemy(s) labels and buttons named in help text, switching back to keys and forth to the pad. GOG's input wrapper reports pads in Xbox order, so other pads should show the right icons too; report a pad whose icons don't match its buttons |
 | PC port fixes (wobble), sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
-| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Uncut_EN.log`. Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Rekindled.log`. Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -102,7 +104,7 @@ reverb\build.bat
 steam\build.bat
 py build_mod.py
 ```
-`build_mod.py` writes `mod\BOF4_Uncut_EN.exe`. The installer embeds only the differences from the original
+`build_mod.py` writes `mod\BOF4_Rekindled.exe`. The installer embeds only the differences from the original
 files, plus SHA-256 checks, for every combination of options.
 
 The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`) also needs `ffmpeg`

@@ -1,4 +1,4 @@
-# Builds mod\BOF4_Uncut_EN.exe: a GUI installer for a clean English GOG install (no Python, no German patch).
+# Builds mod\BOF4_Rekindled.exe: a GUI installer for a clean English GOG install (no Python, no German patch).
 # The installer embeds only what changes (copy-from-original / literal-bytes ops, SHA-256 checked) for every
 # combination of options that touches a file.   py build_mod.py
 # Build-time inputs (paths in config.py): clean English GOG DAT files and BOF4.exe, Naro's Better Descriptions
@@ -95,7 +95,7 @@ def build_variants():
             patched = P.patch_exe(exe, [p for i in key for p in PARTS.get(i, (i,))])
             yield ("BOF4.exe", key, exe, patched)
             # Steam: the same patch, applied in memory by the loader (steam\dsound.dll)
-            yield ("BOF4_Uncut_EN.mem", key, b"", mem_list(exe, patched).encode())
+            yield ("BOF4_Rekindled.mem", key, b"", mem_list(exe, patched).encode())
     yield ("dsound.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "dsound.dll"), "rb").read())
     # DAT files of "content" (scenes, store, Identify) are disjoint, so each has the one key
     assert not (set(P.LINES) & set(P.STORE) or set(P.LINES) & set(P.IDENTIFY_DATS) or set(P.STORE) & set(P.IDENTIFY_DATS))
@@ -194,12 +194,12 @@ def main():
     man = os.path.join(tmp, "manifest.gz")             # deflate: 8 MB -> 2 MB (15 identical DLL variants etc.)
     with gzip.open(man, "wb", 9) as f: f.write(manifest().encode("utf-8"))
     banner, icon = make_art(tmp)
-    exe = os.path.join(OUT, "BOF4_Uncut_EN.exe")
+    exe = os.path.join(OUT, "BOF4_Rekindled.exe")
     subprocess.run([CSC, "/nologo", "/target:winexe", "/optimize+", f"/out:{exe}", f"/win32icon:{icon}",
                     f"/resource:{man},manifest.gz", f"/resource:{banner},banner.png",
                     "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll",
                     os.path.join(HERE, "installer.cs")], check=True)
-    for f in ("BOF4_Uncut_EN.ps1", "Install.bat", "Uninstall.bat"):   # older script-based installer
+    for f in ("BOF4_Uncut_EN.exe", "BOF4_Uncut_EN.ps1", "Install.bat", "Uninstall.bat"):   # pre-rename / script installers
         if os.path.exists(os.path.join(OUT, f)): os.remove(os.path.join(OUT, f))
     print(f"built {exe} ({os.path.getsize(exe) // 1024} KB, manifest {os.path.getsize(man) // 1024} KB)")
 
