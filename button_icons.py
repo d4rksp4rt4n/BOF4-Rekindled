@@ -1,6 +1,6 @@
 # Controller button icons in place of the circled numbers 1-10.
-# The PC port numbers joystick buttons 1-10 and shows them as circled digits: on the Key/Pad Setting screen and
-# in help text (where they replaced the PS1's button symbols: "1: Confirm  2: Cancel", "5/6: Change lure"...).
+# The PC port numbers joystick buttons 1-10 and shows them as circled digits on the Key/Pad Setting screen. With the
+# Start/Back option, keycap hints show the button too (patch_labels, below) while a controller is in use.
 # GOG's input wrapper reports every pad in Xbox order, so button n is always the same physical button:
 #   1 A / cross   2 B / circle   3 X / square   4 Y / triangle   5 LB / L1   6 RB / R1
 #   7 View / Select   8 Menu / Start   9 LS / L3   10 RS / R3
@@ -86,6 +86,103 @@ def patch_font(init, set_):
     a = o + FIRST_GLYPH * CELL
     return init[:a] + glyphs(init[o:o + s], set_) + init[a + 10 * CELL:]
 
+# Button hint labels (with the Start/Back option): in controller mode a keycap hint is sized for "0" (one slot) or
+# "00" (two), and its letters are drawn from these glyphs instead: 2 per button (1-10), appended to the keycap fonts
+# (chunk 8: 16x16 cells, big keycaps; chunk 10: 12x12, small ones), with palette 14 (INIT.DAT chunk 1) for colour.
+# A slot shows cell columns u..u+w-1 of '0' and advances w-1, so a 2-slot label is 2(w-1)+1 columns wide.
+LABEL_FONTS = {8: (16, 104, 3, 10), 10: (12, 91, 2, 8)}   # chunk: cell, glyphs before, '0' u and width (exe tables)
+DOUBLE = {5, 6, 9, 10}                                     # buttons with a 2-slot label (as in the exe)
+P14 = {"white": 8, "grey": 2, "green": 7, "red": 14, "blue": 4, "yellow": 5, "pink": 11}
+LABELS = {"numbers": [(str(n), "white") for n in range(1, 11)],
+          "xbox": [("A", "green"), ("B", "red"), ("X", "blue"), ("Y", "yellow"), ("LB", "white"), ("RB", "white"),
+                   ("view", "white"), ("menu", "white"), ("LS", "white"), ("RS", "white")],
+          "ps": [("cross", "blue"), ("circle", "red"), ("square", "pink"), ("triangle", "green"), ("L1", "white"),
+                 ("R1", "white"), ("select", "white"), ("start", "white"), ("L3", "white"), ("R3", "white")]}
+
+def label_canvas(font, cw, u, w, text, colour, slots):
+    """Label art as rows of palette 14 indices, slots * (w - 1) + 1 columns wide."""
+    W = slots * (w - 1) + 1
+    cell = lambda ch: [[font[((ord(ch) - 0x20) * cw * cw + y * cw + x) // 2] >> (4 * (x & 1)) & 15 for x in range(cw)]
+                       for y in range(cw)]
+    rows = [y for y in range(cw) if any(cell("0")[y])]
+    top, bot = rows[0], rows[-1]
+    out = [[0] * W for _ in range(cw)]
+    if len(text) <= 2:                                     # letters and digits: the font's own glyphs, side by side
+        parts = [cell(ch) for ch in text]
+        cols = [[x for x in range(cw) if any(p[y][x] for y in range(cw))] for p in parts]
+        total = sum(c[-1] - c[0] + 1 for c in cols) + len(parts) - 1
+        x0 = (W - total) // 2
+        for p, c in zip(parts, cols):
+            for y in range(cw):
+                for x in c:
+                    v = p[y][x]
+                    if v and 0 <= x0 + x - c[0] < W: out[y][x0 + x - c[0]] = v
+            x0 += c[-1] - c[0] + 2
+    else:                                                  # symbols, drawn at 8x like the circled icons
+        Z = 8; h = bot - top + 1; s = min(W, h)
+        im = Image.new("L", (W * Z, cw * Z)); d = ImageDraw.Draw(im)
+        cx, cy, r, lw = W * Z / 2, (top + bot + 1) * Z / 2, s * Z / 2 - Z * 0.6, round(Z * 1.4)
+        if text == "cross":
+            k = r * 0.8
+            for a, b in ((-k, k), (k, -k)): d.line((cx - k, cy + a, cx + k, cy + b), fill=255, width=lw)
+        elif text == "circle": d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=255, width=lw)
+        elif text == "square": k = r * 0.85; d.rectangle((cx - k, cy - k, cx + k, cy + k), outline=255, width=lw)
+        elif text == "triangle":
+            d.polygon([(cx, cy - r), (cx + r, cy + r * 0.75), (cx - r, cy + r * 0.75)], outline=255, width=lw)
+        elif text == "view":
+            k = r * 0.5
+            d.rectangle((cx - k * 1.6, cy - k * 1.6, cx + k * 0.4, cy + k * 0.4), outline=255, width=Z)
+            d.rectangle((cx - k * 0.4, cy - k * 0.4, cx + k * 1.6, cy + k * 1.6), fill=255)
+        elif text == "menu":
+            for dy in (-r * 0.6, 0, r * 0.6): d.line((cx - r * 0.8, cy + dy, cx + r * 0.8, cy + dy), fill=255, width=Z)
+        elif text == "select":
+            d.rounded_rectangle((cx - r, cy - r * 0.45, cx + r, cy + r * 0.45), radius=r * 0.45, fill=255)
+        elif text == "start": d.polygon([(cx - r * 0.7, cy - r), (cx + r, cy), (cx - r * 0.7, cy + r)], fill=255)
+        cov = im.resize((W, cw), Image.BOX).load()
+        for y in range(cw):
+            for x in range(W):
+                if cov[x, y] > 40: out[y][x] = 1 if cov[x, y] > 150 else 6
+    main = P14[colour]
+    res = [[0] * W for _ in range(cw)]
+    for y in range(cw):                                    # full ink: the colour; faint ink and a 1-pixel rim: grey
+        for x in range(W):
+            if out[y][x] and out[y][x] <= 5: res[y][x] = main
+            elif out[y][x] or any(0 <= y + b < cw and 0 <= x + a < W and 0 < out[y + b][x + a] <= 5
+                                  for a in (-1, 0, 1) for b in (-1, 0, 1)):
+                res[y][x] = P14["grey"]
+    return res
+
+def label_glyphs(init, chunk, set_):
+    """2 cells per button for SETS-style label set_ ("numbers", "xbox", "ps") in font chunk."""
+    cw, n, u, w = LABEL_FONTS[chunk]
+    o, s, f, t = table(init)[chunk]
+    assert f == 5 and s == n * cw * cw // 2, f"INIT.DAT font chunk {chunk} not as expected"
+    font, out = init[o:o + s], b""
+    for b, (text, colour) in enumerate(LABELS[set_], 1):
+        slots = 2 if b in DOUBLE else 1
+        art = label_canvas(font, cw, u, w, text, colour, slots)
+        for k in range(2):
+            px = [[0] * cw for _ in range(cw)]
+            if k < slots:
+                for y in range(cw):
+                    for x in range(w):
+                        if k * (w - 1) + x < len(art[0]): px[y][u + x] = art[y][k * (w - 1) + x]
+            out += bytes(px[y][x] | px[y][x + 1] << 4 for y in range(cw) for x in range(0, cw, 2))
+    return out
+
+def patch_labels(init, set_):
+    """INIT.DAT with the hint labels appended to both keycap fonts."""
+    ents = table(init); out = init
+    for chunk in sorted(LABEL_FONTS, reverse=True):        # later chunk first: earlier offsets stay valid
+        o, s, f, t = ents[chunk]
+        add = label_glyphs(init, chunk, set_)
+        out = out[:o + s] + add + out[o + s:]
+        ents[chunk][1] += len(add)
+        for e in ents[chunk + 1:]: e[0] += len(add)
+    out = bytearray(out)
+    for i, e in enumerate(ents): struct.pack_into("<4I", out, i * 16, *e)
+    return bytes(out)
+
 def preview(path, init):
     """Original row, then each set: black (normal) and red (selected) ramps on the window colour."""
     o, s, f, t = table(init)[FONT_CHUNK]
@@ -115,4 +212,8 @@ if __name__ == "__main__":
         assert len(p) == len(init) and sum(a != b for a, b in zip(init, p)) <= 10 * CELL
         both = identify_icons.patch_font(p)                                    # composes with Identify
         assert table(both)[FONT_CHUNK][1] == 116 * CELL
+    for k in LABELS:                                                           # hint labels, also with Identify
+        p = identify_icons.patch_font(patch_labels(init, k))
+        for chunk, (cw, n, u, w) in LABEL_FONTS.items():
+            assert table(p)[chunk][1] == (n + 20) * cw * cw // 2
     print("ok; preview in button_icons.png")

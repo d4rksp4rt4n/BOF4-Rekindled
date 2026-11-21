@@ -662,19 +662,75 @@ def wide_culls(d):
 # can't move Start or Select. The joystick loop (0x40E998, DIJOYSTATE at esp+0x20, pad bits in ebp) now also
 # turns Start into PS1 Start and Back into Select, whatever bof4.cfg says. The default table (used for a new
 # bof4.cfg) gets L1/R1 (camera) on LB/RB (5/6), L2 (Change Rank) on RS (10), and Start/Select on 8/7 like the hook.
+# Button hints follow the last device used: the same hook notes "pad" when the pad sets any bit and "keyboard" when
+# any key is down (DIK state 0xABC284). A hint is a keycap with the key's name, drawn by draw_button (0x62A1B0: x, y,
+# flags, PS1 bit, colour) or measured in text (0x62A680). In pad mode, when the bit has a pad button, the name lookup
+# returns "0" or "00" instead (the keycap's size; button_icons.DOUBLE) and remembers the button, and the keycap's
+# letter loop draws that button's label glyphs (2 per button, appended to the keycap fonts by
+# button_icons.patch_labels) with palette 14 instead of the name's. The Key/Pad screen's keyboard column stays keys.
 PAD_SITE = 0x40E9AC                # cmp eax, end of the joystick table (then jl: next entry)
 PAD_CMP = b"\x3d" + struct.pack("<I", 0xABC562)
-PAD = 0x6A7ED0                     # after the sprites stub, same .text padding
+PAD = 0x6A7720                     # .text padding after GOG's own patches (end 0x6A771B), before CAVE
 PAD_DEFAULTS = 0x8D4A88 + 4 * 4    # default joystick table (button u16, bits u16): L1, R1, L2, R2, Start, Select
 PAD_DEFAULTS_ORIG = H("07000004" "08000008" "06000001" "0b000002" "09000800" "0a000100")
 PAD_DEFAULTS_NEW = H("05000004" "06000008" "0a000001" "0b000002" "08000800" "07000100")
+KEYS, PAD_BUTTON, KEY_NAME = 0xABC284, 0x40EF30, 0x40ED10       # DIK state; PS1 bit -> pad button (0: none); DIK -> name
+NAME_SITES = (0x62A26C, 0x62A6B4)  # call KEY_NAME: draw_button's keycap, in-text width
+LETTER_SITE, LETTER_ORIG = 0x62A5F8, H("c6461100" "66894616")    # letter loop: mov byte [esi+0x11], 0; mov [esi+0x16], ax
+KEYPAD_KEYS = 0x501116             # return address of the Key/Pad screen's keyboard column (draw_button's caller)
+LABEL_PALETTE = 0x3C0E             # palette 14 (INIT.DAT chunk 1)
+LABEL_BASE = {"small": 91, "big": 104}   # first label glyph in each keycap font (button_icons.LABEL_FONTS)
+LABEL_DOUBLE = sum(1 << b for b in (5, 6, 9, 10))   # buttons with a 2-slot label (button_icons.DOUBLE)
+
+def asm(base, prog, labels):
+    """Tiny assembler: bytes, str = label, ("j8"/"j32"/"call", opcode, label or address). Fills labels."""
+    size = lambda p: 0 if isinstance(p, str) else len(p) if isinstance(p, bytes) else 2 if p[0] == "j8" else 5
+    at = base
+    for p in prog:
+        if isinstance(p, str): labels[p] = at
+        at += size(p)
+    c = bytearray()
+    for p in prog:
+        if isinstance(p, bytes): c += p
+        elif isinstance(p, tuple):
+            kind, op, t = p; t = labels.get(t, t); nxt = base + len(c) + size(p)
+            if kind == "j8": assert -128 <= t - nxt < 128; c += bytes([op, (t - nxt) & 0xFF])
+            else: c += bytes([op]) + rel(nxt, t)
+    return bytes(c)
 
 def pad_code():
-    c = PAD_CMP + b"\x7c\x14"                               # cmp eax, end; jl last (loop not done yet)
-    c += H("f644245b80" "7403" "83cd08")                    # button 8 (Start) held: or ebp, 0x8 (Start)
-    c += H("f644245a80" "7403" "83cd01")                    # button 7 (Back) held: or ebp, 0x1 (Select)
-    c += PAD_CMP + b"\xc3"                                  # last: the caller's jl needs the cmp flags; ret
-    return c
+    """Returns (code at PAD, entry points)."""
+    a32 = lambda v: struct.pack("<I", v)
+    mode, cur, one, two = PAD, PAD + 1, PAD + 2, PAD + 4    # [mode][button]["0\0"]["00\0"]
+    prog = [b"\0\0" b"0\0" b"00\0" b"\0",
+            "joy", PAD_CMP, ("j8", 0x7C, "last"),           # cmp eax, end; jl last (loop not done yet)
+            H("f644245b80" "7403" "83cd08"),                # button 8 (Start) held: or ebp, 0x8 (Start)
+            H("f644245a80" "7403" "83cd01"),                # button 7 (Back) held: or ebp, 0x1 (Select)
+            H("85ed"), ("j8", 0x74, "kb"),                  # pad bits? -> mode 1
+            H("c605") + a32(mode) + b"\x01", ("j8", 0xEB, "last"),
+            "kb", H("575150" "bf") + a32(KEYS) + H("b940000000" "31c0" "f3af" "58595f"),   # any key down? -> mode 0
+            ("j8", 0x74, "last"), H("c605") + a32(mode) + b"\x00",
+            "last", PAD_CMP, b"\xc3",                       # the caller's jl needs the cmp flags
+            "name", H("c605") + a32(cur) + b"\x00",          # (DIK, PS1 bit): button 0 = a key's name
+            H("803d") + a32(mode) + b"\x00", ("j8", 0x74, "norig"),
+            H("817c245c") + a32(KEYPAD_KEYS), ("j8", 0x74, "norig"),
+            H("ff742408"), ("call", 0xE8, PAD_BUTTON), H("83c404" "85c0"), ("j8", 0x74, "norig"),
+            b"\xa2" + a32(cur),                              # mov [button], al
+            H("b9") + a32(LABEL_DOUBLE) + H("0fa3c1"),      # bt ecx, eax: 2 slots?
+            b"\xb8" + a32(one), ("j8", 0x73, "nret"), b"\xb8" + a32(two),
+            "nret", b"\xc3",
+            "norig", ("j32", 0xE9, KEY_NAME),
+            "letter", H("c6461100"),                        # (mov byte [esi+0x11], 0)
+            H("803d") + a32(cur) + b"\x00", ("j8", 0x74, "lplain"),
+            H("50" "0fb605") + a32(cur) + H("8d4447fe"),    # glyph = 2 * (button - 1) + letter index (edi)
+            H("85c9"), ("j8", 0x74, "lsmall"),              # ecx: big keycap font?
+            H("83c0") + bytes([LABEL_BASE["big"]]), ("j8", 0xEB, "lput"),
+            "lsmall", H("83c0") + bytes([LABEL_BASE["small"]]),
+            "lput", H("66894616" "66c74612") + struct.pack("<H", LABEL_PALETTE) + H("58"), ("j8", 0xEB, "ltest"),
+            "lplain", H("66894616"),                        # (mov [esi+0x16], ax)
+            "ltest", H("85c9" "c3")]                        # the caller's jne needs test ecx, ecx
+    labels = {}
+    return asm(PAD, prog, labels), labels
 
 EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites", "widescreen",
              "startback")
@@ -780,16 +836,21 @@ def patch_exe(d, parts=EXE_PARTS):
         assert wobble_orig_ok(d, b), f"unexpected code at {b:#x}"
     if "wobble" in parts:
         for va, c in wobble_code(): d[fo(va):fo(va) + len(c)] = c
-    pc = pad_code()
-    assert PAD >= SPR + len(sc) and PAD + len(pc) <= WIDE_WINDOW
-    assert d[fo(PAD_SITE):fo(PAD_SITE) + 7] == PAD_CMP + b"\x7c\xe5", f"unexpected code at {PAD_SITE:#x}"
+    pc, pl = pad_code()
+    assert PAD + len(pc) <= CAVE, "Start/Back stubs too big"
+    pad_sites = [(PAD_SITE, PAD_CMP + b"\x7c\xe5", "joy", 5), (LETTER_SITE, LETTER_ORIG, "letter", 8)]
+    pad_sites += [(site, b"\xe8" + rel(site + 5, KEY_NAME), "name", 5) for site in NAME_SITES]
+    for site, orig, _, _ in pad_sites:
+        assert d[fo(site):fo(site) + len(orig)] == orig, f"unexpected code at {site:#x}"
     pd = PAD_DEFAULTS - DATA_VA + DATA_RAW
     assert d[pd:pd + 24] == PAD_DEFAULTS_ORIG, "default joystick table not as expected"
     if "startback" in parts:
         assert d[fo(PAD):fo(PAD) + len(pc)] == bytes(len(pc)), "Start/Back cave not free"
         d[fo(PAD):fo(PAD) + len(pc)] = pc
-        d[fo(PAD_SITE):fo(PAD_SITE) + 5] = b"\xe8" + rel(PAD_SITE + 5, PAD)
+        for site, orig, name, n in pad_sites:              # call stub, nop the rest (the joy cmp's jl stays)
+            d[fo(site):fo(site) + n] = b"\xe8" + rel(site + 5, pl[name]) + b"\x90" * (n - 5)
         d[pd:pd + 24] = PAD_DEFAULTS_NEW
+        make_text_writable(d)                              # the mode byte lives in the cave
     lv = d.find(SCIAS_LEVELS)
     assert lv > 0 and d.count(SCIAS_LEVELS) == 1 and d[lv + 16] == 0, "Scias' level-up table not as expected"
     if "identify" in parts:
