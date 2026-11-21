@@ -663,7 +663,8 @@ def wide_culls(d):
 # turns Start into PS1 Start and Back into Select, whatever bof4.cfg says. The default table (used for a new
 # bof4.cfg) gets L1/R1 (camera) on LB/RB (5/6), L2 (Change Rank) on RS (10), and Start/Select on 8/7 like the hook.
 # Button hints follow the last device used: the same hook notes "pad" when the pad sets any bit and "keyboard" when
-# any key is down (DIK state 0xABC284). A hint is a keycap with the key's name, drawn by draw_button (0x62A1B0: x, y,
+# any key is down (DIK state 0xABC284) except Enter and F1, which GOG's wrapper sends for the stick clicks (L3, R3;
+# the game's fixed Start and Select keys). A hint is a keycap with the key's name, drawn by draw_button (0x62A1B0: x, y,
 # flags, PS1 bit, colour) or measured in text (0x62A680). In pad mode, when the bit has a pad button, the name lookup
 # returns "0" or "00" instead (the keycap's size; button_icons.DOUBLE) and remembers the button, and the keycap's
 # letter loop draws that button's label glyphs (2 per button, appended to the keycap fonts by
@@ -701,14 +702,18 @@ def asm(base, prog, labels):
 def pad_code():
     """Returns (code at PAD, entry points)."""
     a32 = lambda v: struct.pack("<I", v)
-    mode, cur, one, two = PAD, PAD + 1, PAD + 2, PAD + 4    # [mode][button]["0\0"]["00\0"]
-    prog = [b"\0\0" b"0\0" b"00\0" b"\0",
+    mode, cur, two, one = PAD, PAD + 1, PAD + 2, PAD + 3    # [mode][button]["00\0"] ("0" is its tail)
+    prog = [b"\0\0" b"00\0",
             "joy", PAD_CMP, ("j8", 0x7C, "last"),           # cmp eax, end; jl last (loop not done yet)
             H("f644245b80" "7403" "83cd08"),                # button 8 (Start) held: or ebp, 0x8 (Start)
             H("f644245a80" "7403" "83cd01"),                # button 7 (Back) held: or ebp, 0x1 (Select)
             H("85ed"), ("j8", 0x74, "kb"),                  # pad bits? -> mode 1
             H("c605") + a32(mode) + b"\x01", ("j8", 0xEB, "last"),
-            "kb", H("575150" "bf") + a32(KEYS) + H("b940000000" "31c0" "f3af" "58595f"),   # any key down? -> mode 0
+            "kb", H("575150" "31c0"),                       # any key down but Enter (0x1C), F1 (0x3B)? -> mode 0
+            b"\xbf" + a32(KEYS) + H("6a1c59" "f3ae"), ("j8", 0x75, "kfound"),     # keys 0-0x1B (ecx 0 after)
+            H("47" "b11e" "f3ae"), ("j8", 0x75, "kfound"),  # skip Enter; 0x1D-0x3A
+            H("47" "b1c4" "f3ae"),                          # skip F1; 0x3C-0xFF
+            "kfound", H("58595f"),                          # pops keep the flags: ZF set = no key down
             ("j8", 0x74, "last"), H("c605") + a32(mode) + b"\x00",
             "last", PAD_CMP, b"\xc3",                       # the caller's jl needs the cmp flags
             "name", H("c605") + a32(cur) + b"\x00",          # (DIK, PS1 bit): button 0 = a key's name
