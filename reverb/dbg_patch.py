@@ -4,7 +4,8 @@
 # ws_crash.txt logs the start, serious exceptions anywhere in the process (code, address, registers, stack) and the
 # exit, to tell a crash from a clean exit when the game simply closes; it writes through a handle opened at start,
 # without the C runtime or the heap, so it works inside a crash. Build DST with the other reverb\*.c into a debug
-# bof4_reverb.dll; the dumps feed ws_replay.py.
+# bof4_reverb.dll; the dumps feed ws_replay.py. Testing aids: F7 switches random encounters (off at start), F6 opens
+# the save screen on a map (save anywhere).
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 s = open(src).read()
@@ -69,6 +70,16 @@ INIT = r'''    { static int init;
             VirtualProtect(f, 3, o, &o); FlushInstructionCache(GetCurrentProcess(), f, 3);
             crash_log(noenc ? "random encounters off (F7)" : "random encounters on (F7)");
         } }
+      /* testing aid: F6 opens the save screen on a map, as an inn's save point does (its script command at 0x522A08:
+         request 7 = the save screen, program 8; 0x520290(4) starts the fade out, unless one is running), to save
+         right before a cutscene. Only on a map (program 2) with no request or fade pending. */
+      { static int k6; int k = GetAsyncKeyState(VK_F6) & 0x8000;
+        if (k && !k6 && MEM(unsigned short, 0xBAB408) == 2 && !MEM(u8, 0xBAB428) && !MEM(unsigned short, 0xBAB480)) {
+            MEM(u8, 0xB50A2C) = 0; MEM(u8, 0xBAB428) = 7;
+            if (((char (__cdecl *)(int))0x520290)(4)) { MEM(u8, 0xBAB428) = 0; crash_log("save screen busy (F6)"); }
+            else crash_log("save screen requested (F6)");
+        }
+        k6 = k; }
       { static int mv = 6000, mc = 1500; static char m[256]; int cb = (int)(MEM(u32, CMD_PTR) - CMD_BASE) / 8;
         if (nv > mv || cb > mc) {
             if (nv > mv) mv = nv;

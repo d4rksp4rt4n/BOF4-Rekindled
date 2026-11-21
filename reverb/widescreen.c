@@ -86,16 +86,29 @@ static Prim *g_p; static int g_cap_p;
 
 /* per frame: texture -> x range of its 2D primitives (open addressing; a full table just means "not found") */
 #define TEX_SLOTS 2048
-typedef struct { u32 tex; float x0, x1; int n, edge; } TexSpan;
+typedef struct { u32 tex; float x0, x1, gap; int n, edge; } TexSpan;  /* gap: widest one between pieces (-1: not yet) */
 static TexSpan g_tex[TEX_SLOTS];
 static TexSpan *tex_span(u32 tex) {
     u32 h = (tex * 2654435761u) >> 21, i;                       /* 11 bits */
     for (i = 0; i < TEX_SLOTS; i++, h = (h + 1) & (TEX_SLOTS - 1)) {
         TexSpan *s = &g_tex[h];
         if (s->tex == tex + 1) return s;                         /* stored + 1: 0 marks an empty slot */
-        if (!s->tex) { s->tex = tex + 1; s->x0 = 1e30f; s->x1 = -1e30f; return s; }
+        if (!s->tex) { s->tex = tex + 1; s->x0 = 1e30f; s->x1 = -1e30f; s->gap = -1; return s; }
     }
     return NULL;
+}
+
+/* the widest gap between x ranges (pieces of one picture lie side by side: no gap wider than a seam) */
+typedef struct { float x0, x1; } Span;
+static Span *g_sp; static int g_sp_cap, *g_win, g_win_cap;     /* g_win: menu windows of the frame */
+static int span_cmp(const void *a, const void *b) { float d = ((const Span *)a)->x0 - ((const Span *)b)->x0; return (d > 0) - (d < 0); }
+static float max_gap(Span *sp, int n) {
+    float e, g = 0;
+    int i;
+    if (n < 2) return 0;
+    qsort(sp, n, sizeof *sp, span_cmp);
+    for (e = sp[0].x1, i = 1; i < n; i++) { if (sp[i].x0 - e > g) g = sp[i].x0 - e; e = fmaxf(e, sp[i].x1); }
+    return g;
 }
 
 /* a tile of a sky picture: a quarter of the screen wide and high, on screen vertically (a ground mesh drawn with the
@@ -120,7 +133,8 @@ static int fishing(void) { return !memcmp((const void *)(size_t)FISH_DATA, FISH_
 /* Which HUD panels move, by screen. The main program number is 2 on maps (towns, fields, the world map, fishing
    spots), 1 while a map is entered, 6 while the camera turns, 4 during a talk or event on a map, 3 in the Camp menu
    (whose first and last frames still show the map, before its full-screen background is drawn), 5 in battle, 7 in
-   a shop's menu (its first and last frames still show the compass). */
+   a shop's menu (its first and last frames still show the compass), 8 in an inn's save menu, 10 in a Manillo
+   shop's menu (whose fades still show the compass too). */
 #define PROG_ID    0xBAB408
 enum { HUD_ALL = 1, HUD_BOTTOM = 2, HUD_TOPLEFT = 4, HUD_TOPRIGHT = 8 };
 static int hud_mode(int menu_bg) {
@@ -129,18 +143,22 @@ static int hud_mode(int menu_bg) {
     if (prog == 5) return HUD_TOPRIGHT | HUD_TOPLEFT;            /* battle: the Enemy(s) box; the map's compass */
     if ((prog == 1 || prog == 2 || prog == 6 || prog == 3) && !menu_bg)   /* not behind the Camp background */
         return HUD_TOPLEFT | HUD_BOTTOM;     /* maps: the compass of towns and fields, the world map's bottom panels */
-    if (prog == 4 || prog == 7) return HUD_TOPLEFT;  /* talking, shops: the compass; dialogue, choices, shop stay */
+    if (prog == 4 || prog == 7 || prog == 8 || prog == 10)  /* talking, shops, inns: the compass */
+        return HUD_TOPLEFT;                                  /* (dialogue, choices, the shop stay) */
     return 0;
 }
 
 /* a piece of the UI layer: plain 2D, or a two-pass frame on the sprite layer (rhw 0.1: the fishing panel's and the
    Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand; on maps only
-   opaque ones, the Menu box of map travel and its key labels: a chimney's see-through smoke would join the compass), not taken by a
+   opaque boxes of some size, the Menu box of map travel behind its key labels: a chimney's smoke, two-pass tiles a
+   few percent of the screen wide, would join the compass and be pushed near the bottom, as in Chedo), not taken by a
    backdrop rule (single-pass translucent labels, such as battle's "Enemy(s)", are squeezed but not cut: keep 2) */
 static int g_spr;                                             /* sprite-layer frames count (fishing, battle) */
+static float g_box;                                           /* the width of such a box on maps (15% of the screen) */
 static int ui_piece(const Prim *p, const Vtx *v) {
     return (!p->keep || p->keep == 2) && fabsf(v[p->v0].z - UI_Z) < 1e-6f &&
-           (p->flat || (p->pair && (g_spr || !(p->w & 0x20)) && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
+           (p->flat || (p->pair && (g_spr || (!(p->w & 0x20) && p->x1 - p->x0 >= g_box)) &&
+                        fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
 }
 
 /* HUD panels to the screen edges: windows (two-pass frames, or tiles flagged 0x4000) that touch or overlap are one
@@ -193,7 +211,7 @@ static int g_cnt[MAX_PANEL], *g_gi, g_gi_cap;                 /* plain 2D pieces
 static int grow(void **p, int *cap, int n, int size);
 static int root(int a) { while (g_par[a] != a) a = g_par[a] = g_par[g_par[a]]; return a; }
 static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, float bt, float cx, float k, int sel) {
-    float m = (g_spr = (sel & (HUD_ALL | HUD_TOPRIGHT)) != 0, 0.02f * (r - l)), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
+    float m = (g_spr = (sel & (HUD_ALL | HUD_TOPRIGHT)) != 0, g_box = 0.15f * (r - l), 0.02f * (r - l)), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
     int n = 0, i, j, ci;
     for (j = 0; j < np && n < MAX_PANEL; j++)
         if (ui_piece(&pw[j], v) && !(pw[j].w & 0x2000) && pw[j].w & 4 &&
@@ -292,7 +310,7 @@ static void *low_alloc(u32 n) {                     /* memory below 16 MB, where
 void wide_exec(void *surf, int *rect, int flag) {
     static int bufs;
     float l = (float)rect[0], r = (float)rect[2], t = (float)rect[1], bt = (float)rect[3], cx = (l + r) * 0.5f, k;
-    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m, menu_bg = 0;
+    int nv = (int)(MEM(u32, VTX_PTR) - VTX_BASE) / 32, vi = 0, nvp = 0, np = 0, i, j, m, menu_bg = 0, nw;
     u32 c = CMD_BASE, end = MEM(u32, CMD_PTR);
     Vtx *v = (Vtx *)VTX_BASE;
     k = r > l ? 4.0f / 3 * (bt - t) / (r - l) : 1;
@@ -309,7 +327,9 @@ void wide_exec(void *surf, int *rect, int flag) {
         MEM(u32, POOL_VARS + 4) = p1 ? (u32)(size_t)p1 : 0xB57400;
     }
     if (k > 0.999f || nv <= 0 || nv > 1 << 18 || end < CMD_BASE || end - CMD_BASE > 1 << 20 ||
-        !grow((void **)&g_bak, &g_cap, nv, sizeof(Vtx)) || !grow((void **)&g_p, &g_cap_p, (end - CMD_BASE) / 8 + 1, sizeof(Prim))) {
+        !grow((void **)&g_bak, &g_cap, nv, sizeof(Vtx)) || !grow((void **)&g_p, &g_cap_p, (end - CMD_BASE) / 8 + 1, sizeof(Prim)) ||
+        !grow((void **)&g_sp, &g_sp_cap, (end - CMD_BASE) / 8 + 1, sizeof(Span)) ||
+        !grow((void **)&g_win, &g_win_cap, (end - CMD_BASE) / 8 + 1, sizeof(int))) {
         exec(surf, rect, flag); return;
     }
     memcpy(g_bak, v, (size_t)nv * sizeof(Vtx));
@@ -396,7 +416,9 @@ void wide_exec(void *surf, int *rect, int flag) {
         }
     }
     /* runs of consecutive textured 2D tiles (one command word) reaching past both 4:3 edges belong to the scene, even
-       when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2). Except a floor
+       when each tile has its own texture (a summon's sky in two halves) and they lie side by side (no gap over 5% of
+       the width; not a battle's party boxes sliding in from both sides with the screen between them: cut like other
+       menus): squeezed but not cut (keep = 2). Except a floor
        drawn in 2D in perspective (the plains' far ground below the sky: a fan of trapezoids whose top edge, at the
        horizon, spans exactly the 4:3 width): squeezed, its top would leave the 16:9 corners bare, so it is stretched
        with the screen (keep = 1). */
@@ -404,9 +426,9 @@ void wide_exec(void *surf, int *rect, int flag) {
         float x0 = 1e30f, x1 = -1e30f;
         int q, o;
         for (j = i; j < np && g_p[j].flat && g_p[j].w & 4 && g_p[j].w == g_p[i].w; j++) {
-            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1);
+            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1); g_sp[j - i].x0 = g_p[j].x0; g_sp[j - i].x1 = g_p[j].x1;
         }
-        if (j - i > 1 && x0 < l - 0.5f && x1 > r + 0.5f)
+        if (j - i > 1 && x0 < l - 0.5f && x1 > r + 0.5f && max_gap(g_sp, j - i) <= 0.05f * (r - l))
             for (m = i; m < j; m++) {                            /* row by row (same top and bottom) */
                 float tx0 = 1e30f, tx1 = -1e30f, y0 = g_p[m].y0, y1 = g_p[m].y1;
                 if (g_p[m].keep) continue;
@@ -419,8 +441,23 @@ void wide_exec(void *surf, int *rect, int flag) {
                         g_p[o].keep = fabsf(tx0 - l) <= 0.5f && fabsf(tx1 - r) <= 0.5f ? 1 : 2;
             }
     }
+    /* a fan of untextured 2D triangles round one point reaching past both 4:3 edges (a battle's darkening ring, sized
+       for the 4:3 frame): stretched with the screen as one picture. As edge masks, its points past an edge would stay
+       while those just inside moved in, and the dark rim would cut wedges into the picture. */
+    for (i = 0; i < np; i = j > i ? j : i + 1) {
+        float x0 = 1e30f, x1 = -1e30f;
+        for (j = i; j < np && g_p[j].flat && !(g_p[j].w & 4) && g_p[j].w == g_p[i].w && g_p[j].n == 3 &&
+             v[g_p[j].v0].x == v[g_p[i].v0].x && v[g_p[j].v0].y == v[g_p[i].v0].y; j++) {
+            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1);
+        }
+        if (j - i >= 8 && x0 < l - 0.5f && x1 > r + 0.5f)
+            for (m = i; m < j; m++) g_p[m].keep = 1;
+    }
     /* likewise all 2D primitives of a texture that together reach past both 4:3 edges (sky panoramas, spell
-       effects and their backdrops): squeezed but not cut (keep = 2). Menus sliding off reach past one edge only. */
+       effects and their backdrops): squeezed but not cut (keep = 2), when they lie side by side across that span (no
+       gap over 5% of the width). Menus sliding off reach past one edge only; a menu parked off screen on both sides
+       (the Manillo shop's boxes, a battle's party boxes) shares its window textures across the span, in separate
+       boxes with wide gaps between them. */
     memset(g_tex, 0, sizeof g_tex);
     for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4) {
         TexSpan *s = tex_span(g_p[j].tex);
@@ -429,7 +466,15 @@ void wide_exec(void *surf, int *rect, int flag) {
     }
     for (j = 0; j < np; j++) if (g_p[j].flat && g_p[j].w & 4 && !g_p[j].keep) {
         TexSpan *s = tex_span(g_p[j].tex);
-        if (s && s->x0 < l - 0.5f && s->x1 > r + 0.5f) g_p[j].keep = 2;
+        if (s && s->x0 < l - 0.5f && s->x1 > r + 0.5f) {
+            if (s->gap < 0) {                                    /* once per texture: its pieces' widest gap */
+                int ns = 0;
+                for (i = 0; i < np; i++)
+                    if (g_p[i].flat && g_p[i].w & 4 && g_p[i].tex == g_p[j].tex) { g_sp[ns].x0 = g_p[i].x0; g_sp[ns++].x1 = g_p[i].x1; }
+                s->gap = max_gap(g_sp, ns);
+            }
+            if (s->gap <= 0.05f * (r - l)) g_p[j].keep = 2;
+        }
     }
     /* a single large picture drawn to an edge of the 4:3 frame (a summon's first cloud, before the rest of its layer
        is on screen): stretched too, when every piece of its texture touches an edge (a picture drifting across the
@@ -446,10 +491,30 @@ void wide_exec(void *surf, int *rect, int flag) {
         else if (!p->keep && p->flat && p->w & 4 && p->w & 0x20 && !p->pair) p->keep = 2;
     }
     if ((m = hud_mode(menu_bg)) != 0) hud_push(g_p, np, v, l, r, t, bt, cx, k, m);
+    /* menu windows cut at the 4:3 edge (solid two-pass frames, tiles flagged 0x4000; not HUD panels at the screen
+       edges, nor see-through two-pass puffs of mist, the waterfall's):
+       what lies on them while they slide past it goes too, whatever it is (a shop's item icons, see-through or on
+       the sprite layer, its separator lines, the boxes' gradients and black shadows, which as untextured pieces
+       would otherwise keep their corners past the edge). Only upright ones (not the world map's slanted vignette
+       over its panels), not over half the screen wide (fades, wipes). */
+    for (j = nw = 0; j < np; j++)
+        if (g_p[j].flat && g_p[j].w & 4 && !g_p[j].keep && !g_p[j].push && (g_p[j].pair || g_p[j].w & 0x4000) &&
+            !(g_p[j].w & 0x2020) && fabsf(v[g_p[j].v0].z - UI_Z) < 1e-6f) g_win[nw++] = j;
     for (j = 0; j < np; j++) {
         Prim *p = &g_p[j];
-        int untex = !(p->w & 4);
+        int untex = !(p->w & 4), onw = 0;
         if (p->keep == 1) continue;
+        if (nw && p->push == 0 && (p->x0 < l - 0.5f || p->x1 > r + 0.5f) && p->x1 - p->x0 <= 0.5f * (r - l) &&
+            fabsf(v[p->v0].z - UI_Z) < 1e-6f && (p->flat || fabsf(v[p->v0].rhw - 0.1f) < 1e-6f) && upright(v + p->v0, p->n)) {
+            float mx = (p->x0 + p->x1) * 0.5f, my = (p->y0 + p->y1) * 0.5f;
+            for (i = 0; i < nw && !onw; i++)
+                onw = mx >= g_p[g_win[i]].x0 && mx <= g_p[g_win[i]].x1 && my >= g_p[g_win[i]].y0 && my <= g_p[g_win[i]].y1;
+            if (onw) {
+                for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * k;
+                clip(v + p->v0, p->n, cx - (cx - l) * k, cx + (r - cx) * k);
+                continue;
+            }
+        }
         if (p->keep == 3) { for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * p->fk + p->fs; continue; }
         if (p->x1 - p->x0 < 0.02f * (r - l) && p->y1 - p->y0 < 0.02f * (r - l))  /* a speck is never a mask (the */
             untex = 0;                                  /* Wind Shrine's dust across the edge: whole, not a line) */
