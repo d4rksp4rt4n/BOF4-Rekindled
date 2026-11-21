@@ -4,35 +4,37 @@ A patcher for the English GOG release of *Breath of Fire IV* that restores conte
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
 option can be switched on or off, and "Restore original files" undoes everything. 
 
-| Option | What it does |
-|---|---|
-| Restore cut scenes | Ryu/Ursula at the checkpoint, Ursula on Zig's ship, Emperor Soniel's attack on Fou-Lu and the Saldine Island bath scene, with English text |
-| Unlock the Dengeki Store | The Japan-only store, with its original English (US PlayStation) text and the graphics the English port dropped |
-| Stutter fix | The per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches) |
-| PlayStation reverb | The PC music is dry MP3 recordings; this adds the PS1 sound chip's reverb back at runtime, using the PS1 game's own setting |
-| Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
-| Scias learns Identify | Restores the cut Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
-| Better Descriptions | Naro's descriptions of hidden item, equipment and master effects |
-| 60 fps (experimental) | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Off by default; Scroll Lock switches it off and on while playing |
-| No PS1 wobble | In rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
-| Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Off by default; Insert switches between shrink only, full perspective and off while playing |
-| Widescreen (experimental) | At a 16:9 resolution the game stretches its 4:3 picture to the full width. This keeps the proportions right and shows more of the 3D scene at the sides instead; menus, text and the HUD stay in the centred 4:3 area, and movies play in 4:3 with black bars. Choose the resolution in the game: Camp → Settings → Screen adjust. Off by default |
-| Controller Start/Back (experimental) | A controller's Start and Back (View/Select) buttons work as the PS1's Start and Select. The PC port leaves them on the stick clicks and its Key/Pad Setting screen can't move them. A new key setup also puts the camera on LB/RB and Change Rank on the right stick click. Off by default |
-| Xbox / PlayStation button icons (experimental) | The game names controller buttons with circled numbers ①–⑩, on the Key/Pad Setting screen and in help text ("①: Confirm"). These show the button itself instead: A, B, X, Y, LB, RB, View, Menu, LS, RS, or ✕, ○, □, △, L1, R1, Select, Start, L3, R3. One set at a time. Off by default |
+The options come in four groups. Content and fixes are on by default; enhancements and controller options
+are experimental and off by default.
+
+| Group | Option | What it does |
+|---|---|---|
+| Restored content | Restore cut content | Everything the English release removed: the four cut scenes (Ryu and Ursula at the checkpoint, Ursula on Zig's ship, Emperor Soniel's attack on Fou-Lu, the Saldine Island bath scene) with English text; the Japan-only Dengeki Store, with its original English (US PlayStation) text and the graphics the English port dropped; and Scias' Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
+| | Better Descriptions (by Naro) | Naro's descriptions of hidden item, equipment and master effects and resistances |
+| Fixes | PC port fixes | Stutter: the per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches). Wobble: in rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
+| | Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
+| | PlayStation reverb | The PC music is dry MP3 recordings; this adds the PS1 sound chip's reverb back at runtime, using the PS1 game's own setting |
+| Enhancements (experimental) | 60 fps | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Scroll Lock switches it off and on while playing |
+| | Widescreen | At a 16:9 resolution the game stretches its 4:3 picture to the full width. This keeps the proportions right and shows more of the 3D scene at the sides instead; menus, text and the HUD stay in the centred 4:3 area, and movies play in 4:3 with black bars. Choose the resolution in the game: Camp → Settings → Screen adjust |
+| | Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Insert switches between shrink only, full perspective and off while playing |
+| Controller (experimental) | Start/Back as Start/Select | A controller's Start and Back (View/Select) buttons work as the PS1's Start and Select. The PC port leaves them on the stick clicks and its Key/Pad Setting screen can't move them. A new key setup also puts the camera on LB/RB and Change Rank on the right stick click. Button hints (the world map's Menu panel, battle's Menu and Enemy(s) labels, buttons named in help text) show keyboard keys even with a controller; with this their keycaps show the controller's button while you play with it (A, B, LB… in their colours, ✕ ○ □ △…, or numbers, as chosen under Button icons), and keys again once you press a key |
+| | Button icons | Numbers (original), Xbox or PlayStation. The game names controller buttons with circled numbers ①–⑩ on the Key/Pad Setting screen. Xbox and PlayStation show the button itself instead: A, B, X, Y, LB, RB, View, Menu, LS, RS, or ✕, ○, □, △, L1, R1, Select, Start, L3, R3 |
+
+The installer explains each option when you point at it.
 
 ## For players
 
 1. You need the English GOG version of Breath of Fire IV. The installer checks every file and refuses
    to change anything that isn't the original English GOG data.
 2. Download `BOF4_Uncut_EN.exe` from this repository's **Releases** page, put it next to `BOF4.exe`
-   and run it. Tick the options you want and press **Apply**.
+   and run it. Switch on the options you want and press **Apply**.
 3. Originals are kept in `BOF4_Uncut_EN_backup`. Run the installer again any time to change options or
    to restore the original files. On start it checks GitHub for a newer release and shows a link if
    there is one (nothing is downloaded or sent).
 
 Notes:
 - **Saves past Saldine:** a save made in the unmodded game after the party reached the Saldine Island
-  creek will freeze when it enters the creek with "Restore cut scenes" on, because the bath scene still
+  creek will freeze when it enters the creek with "Restore cut content" on, because the bath scene still
   counts as unseen. Use an earlier save, or play that save without that option.
 - **Windows warnings:** the installer is unsigned, edits `BOF4.exe` and adds a DLL, so Windows SmartScreen
   or antivirus software may warn about it. The full source is here; you can build it yourself.
@@ -69,14 +71,14 @@ did, where you were in the game, and, if possible, a save file.
 |---|---|
 | Restored scenes | All four tested in game: the checkpoint, Ursula on Zig's ship, Soniel vs. Fou-Lu and the Saldine bath scene |
 | Dengeki Store | Tested in game: shop and lottery work, with English text and the clerk's portrait. The signs on the building and in the shop stay Japanese: they are painted into the textures, and the store never had an English release |
-| Stutter fix, reverb | Tested over long play sessions |
+| PC port fixes (stutter), reverb | Tested over long play sessions |
 | Music loops | Many songs checked by ear and sample-exact in game; not every song in every area has been heard. Report any song whose loop sounds off (jump, gap, replayed intro), with the area |
-| Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
+| Identify (in Restore cut content) | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
 | **Widescreen** | **Experimental.** Tested at 1920×1080 and 3840×2160 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, all summons, the dragon Breath attacks), the fishing minigame, the Sand Flier race, busy towns (Synesta), the plains, every map and field of the game (walked with random encounters off), shops, dungeons with 2D effects (the Shrine's lasers and lamps, the Tomb's ghost blocks, waterfall mist), menus and the intro movie, also together with 60 fps and sprite depth scaling. HUD at the screen edges: the fishing minigame's panels, the field compass, the world map's Menu panel and road box, battle's Enemy(s) box; other panels (menus, dialogue, the battle command menu and party status) keep their 4:3 positions. Known limits: the game's own draw distance shows more at the far corners (the Sand Flier race's distant walls and grass pop in at the sides too); some sprites still vanish at the 4:3 edge (the fish in Flood Tide). Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
-| **Controller Start/Back, button icons** | **New, experimental.** Icons checked in game on the Key/Pad Setting screen (both sets, normal and selected colours). Start/Back need testing with a real controller: Start at "Press Enter" and to pause, Back for the world map's travel menu and help. GOG's input wrapper reports pads in Xbox order, so other pads should show the right icons too; report a pad whose icons don't match its buttons |
-| No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
-| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
+| **Controller Start/Back, button icons** | **New, experimental.** Icons checked in game on the Key/Pad Setting screen (both sets, normal and selected colours). Start/Back tested with an Xbox-order controller. Controller button hints checked on the world map's Menu panel and battle's labels (controller mode forced in memory); not yet seen in help text or with a real controller switching back and forth. GOG's input wrapper reports pads in Xbox order, so other pads should show the right icons too; report a pad whose icons don't match its buttons |
+| PC port fixes (wobble), sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Uncut_EN.log`. Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -121,7 +123,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `button_icons.py` | Xbox/PlayStation button icons in place of the circled numbers (font glyphs); run it for a preview image |
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
-| `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
+| `steam\` | Steam loader: `dsound.dll` proxy (`bof4_loader.c`, no C runtime) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
 | `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures), sprite depth scaling (`sprites.c`) and widescreen (`widescreen.c`) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |
@@ -149,6 +151,12 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
   a hook at the end of that loop also sets Start for button 8 and Select for button 7. The default joystick
   table (used for a new `bof4.cfg`) moves the camera from 7/8 to LB/RB, Change Rank (L2) from 6 to RS, and
   Start/Select from the stick clicks to 8/7.
+  The same hook remembers the last device used (controller when it sets any bit, keyboard when any key is
+  down). A hint is a keycap with the key's name in a small font (`0x62A1B0` draws it, `0x62A680` measures it in
+  text). In controller mode the name lookup returns a 1- or 2-character placeholder that sizes the keycap, and
+  the keycap's letter loop draws the button's label instead: 2 glyphs per button appended to both keycap fonts
+  in `INIT.DAT` (`button_icons.patch_labels`), drawn with palette 14, which has the green, red, blue, yellow
+  and pink. The label art comes with the chosen icon set, so the exe needs no setting.
 - **Button icons:** the circled numbers are font glyphs 0x5E–0x67 (text chars 0x7E–0x87, the PS1's button
   symbol codes). `button_icons.py` redraws them inside the game's own ring at 8× and reduces them to the
   font's 8 ink levels, so they take the text colours (red when selected) like letters.

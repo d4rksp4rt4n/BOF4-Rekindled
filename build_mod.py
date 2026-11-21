@@ -14,36 +14,45 @@ GAME = os.path.dirname(HERE)
 OUT = os.path.join(HERE, "mod")
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
-OPTIONS = [  # id, label, description (shown in the installer)
-    ("uncut", "Restore cut scenes",
-     "Checkpoint, Zig's ship, Soniel vs. Fou-Lu and Saldine bath scenes, with English text."),
-    ("dengeki", "Unlock the Dengeki Store",
-     "The Japanese-only store, with its original English (US PlayStation) text."),
-    ("stutter", "Stutter fix",
-     "Clears the screen on the GPU instead of reading it back every frame (fixes random hitches)."),
-    ("reverb", "PlayStation reverb",
-     "Adds the PS1's reverb back to the music; the PC recordings are dry (adds bof4_reverb.dll)."),
-    ("loops", "Correct music loops",
-     "Songs loop from their loop point instead of replaying the intro (uses bof4_reverb.dll)."),
-    ("identify", "Scias learns Identify",
-     "Restores the cut Identify ability (level 3), with element icons on its screen as in the PS1 hack."),
-    ("desc", "Better Descriptions (by Naro)",
-     "Item, equipment and master descriptions list hidden effects and resistances."),
-    ("fps60", "60 fps (experimental)",
-     "Draws an in-between frame for each 30 fps frame (uses bof4_reverb.dll). Scroll Lock: off/on.", "off"),
-    ("wobble", "No PS1 wobble",
-     "Rooms with lighting effects (North Chamba...) keep exact 3D positions instead of snapping to PS1 pixels."),
-    ("sprites", "Sprite depth scaling",
-     "Characters far from the camera shrink like the 3D around them instead of seeming to grow (bof4_reverb.dll).", "off"),
-    ("widescreen", "Widescreen (experimental)",
-     "At a 16:9 resolution the 3D fills the screen with correct proportions; menus stay 4:3 (bof4_reverb.dll).", "off"),
-    ("startback", "Controller Start/Back (experimental)",
-     "A pad's Start and Back work as Start and Select. A new key setup puts the camera on LB/RB.", "off"),
-    ("xbox", "Xbox button icons (experimental)",
-     "A, B, LB... instead of the circled numbers (Key/Pad screen, help text). Only one icon set at a time.", "off"),
-    ("ps", "PlayStation button icons (experimental)",
-     "Cross, circle, L1... instead of the circled numbers (Key/Pad screen, help text). Only one icon set at a time.", "off"),
-]   # id, label, description[, "off" = unticked by default]
+CONTENT, FIXES, MORE, PAD = "Restored content", "Fixes", "Enhancements (experimental)", "Controller (experimental)"
+OPTIONS = [  # group, id, label, description, on/off by default[, choices "id=label" for a dropdown]
+    (CONTENT, "content", "Restore cut content",
+     "Puts back what the English release removed: four cut scenes (Ryu and Ursula at the checkpoint, Ursula on "
+     "Zig's ship, Soniel's attack on Fou-Lu, the Saldine bath scene) with English text, the Japan-only Dengeki "
+     "Store, and Scias' Identify ability (learned at level 3, takes effect in a new game). Note: saves made past "
+     "the Saldine creek in the unmodded game freeze at the bath scene.", "on"),
+    (CONTENT, "desc", "Better Descriptions (by Naro)",
+     "Item, equipment and master descriptions also list hidden effects and resistances.", "on"),
+    (FIXES, "fixes", "PC port fixes",
+     "Fixes random stutters (the screen was read back from the GPU every frame) and the swimming 3D in rooms "
+     "with lighting effects, such as North Chamba.", "on"),
+    (FIXES, "loops", "Correct music loops",
+     "Songs loop from their real loop point instead of restarting the intro, without the click at each restart.", "on"),
+    (FIXES, "reverb", "PlayStation reverb",
+     "Adds back the reverb the PS1's sound chip put on the music. The PC recordings are dry. Strength adjustable "
+     "in BOF4_reverb.ini.", "on"),
+    (MORE, "fps60", "60 fps",
+     "Draws an in-between frame for each of the game's 30 frames per second, so camera and characters move "
+     "smoothly. Scroll Lock turns it off and on while playing.", "off"),
+    (MORE, "widescreen", "Widescreen",
+     "At a 16:9 resolution, the 3D fills the screen with correct proportions and more view at the sides instead "
+     "of being stretched. Menus stay 4:3.", "off"),
+    (MORE, "sprites", "Sprite depth scaling",
+     "Characters far from the camera shrink like the 3D around them, instead of seeming to grow. Insert switches "
+     "the mode while playing.", "off"),
+    (PAD, "startback", "Start/Back as Start/Select",
+     "A controller's Start and Back work as the PS1 Start and Select (Press Enter, the world map's travel menu). "
+     "New key setups put the camera on LB/RB. While you play with a controller, button hints show its buttons.", "off"),
+    (PAD, "icons", "Button icons:",
+     "Shows Xbox or PlayStation button symbols instead of the circled numbers 1–10 on the Key/Pad Setting "
+     "screen, and in the controller's button hints (A green, B red...).", "off", "=Numbers (original)", "xbox=Xbox", "ps=PlayStation"),
+]
+# Installer options that stand for several patch_exe parts; the others are one part of the same name.
+PARTS = {"content": ("uncut", "dengeki", "identify"), "fixes": ("stutter", "wobble")}
+# Option ids as variant keys use them, in manifest order (a dropdown contributes its choices).
+IDS = [c.split("=")[0] for o in OPTIONS for c in (o[5:] or [o[1]]) if c[0] != "="]
+EXE_OPTS = [i for i in IDS if set(PARTS.get(i, (i,))) <= set(P.EXE_PARTS)]
+assert sorted(p for i in EXE_OPTS for p in PARTS.get(i, (i,))) == sorted(P.EXE_PARTS)
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
 # Naro's PC release (Nexus): one BPS patch per DAT file, against the English GOG files.
@@ -78,38 +87,46 @@ def bps(src, p):
 
 # ---------------------------------------------------------------- variants
 def build_variants():
-    """Yields (path, key, original, patched), key = tuple of option ids applied (one at a time: 4094 exe variants)."""
+    """Yields (path, key, original, patched), key = tuple of option ids applied, in IDS order (255 exe variants)."""
     en = lambda f: open(os.path.join(config.CLEAN_DAT, f), "rb").read()
     exe = open(config.CLEAN_EXE, "rb").read()
-    for n in range(1, len(P.EXE_PARTS) + 1):
-        for key in itertools.combinations(P.EXE_PARTS, n):
-            patched = P.patch_exe(exe, key)
+    for n in range(1, len(EXE_OPTS) + 1):
+        for key in itertools.combinations(EXE_OPTS, n):
+            patched = P.patch_exe(exe, [p for i in key for p in PARTS.get(i, (i,))])
             yield ("BOF4.exe", key, exe, patched)
-            # Steam: the same patch, applied in memory by the loader (steam\version.dll)
+            # Steam: the same patch, applied in memory by the loader (steam\dsound.dll)
             yield ("BOF4_Uncut_EN.mem", key, b"", mem_list(exe, patched).encode())
-    yield ("version.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "version.dll"), "rb").read())
+    yield ("dsound.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "dsound.dll"), "rb").read())
+    # DAT files of "content" (scenes, store, Identify) are disjoint, so each has the one key
+    assert not (set(P.LINES) & set(P.STORE) or set(P.LINES) & set(P.IDENTIFY_DATS) or set(P.STORE) & set(P.IDENTIFY_DATS))
     for f, msgs in P.LINES.items():
-        yield ("DAT\\" + f, ("uncut",), en(f), P.patch_text(en(f), msgs))
+        yield ("DAT\\" + f, ("content",), en(f), P.patch_text(en(f), msgs))
     for f in P.STORE:
-        yield ("DAT\\" + f, ("dengeki",), en(f), P.patch_store(en(f)))
+        yield ("DAT\\" + f, ("content",), en(f), P.patch_store(en(f)))
     dll = open(os.path.join(HERE, "reverb", "bof4_reverb.dll"), "rb").read()
-    dll_parts = ("reverb", "loops", "fps60", "sprites", "widescreen")  # same DLL serves all of them
+    dll_parts = [i for i in IDS if i in ("reverb", "loops", "fps60", "sprites", "widescreen")]  # same DLL serves all
     for n in range(1, len(dll_parts) + 1):
         for key in itertools.combinations(dll_parts, n):
             yield ("bof4_reverb.dll", key, b"", dll)
     for f, patch in P.IDENTIFY_DATS.items():
-        yield ("DAT\\" + f, ("identify",), en(f), patch(en(f)))
-    for k in button_icons.SETS:                                        # INIT.DAT font: icons, with or without Identify
-        icons = button_icons.patch_font(en("INIT.DAT"), k)
-        yield ("DAT\\INIT.DAT", (k,), en("INIT.DAT"), icons)
-        yield ("DAT\\INIT.DAT", ("identify", k), en("INIT.DAT"), identify_icons.patch_font(icons))
+        if f != "INIT.DAT": yield ("DAT\\" + f, ("content",), en(f), patch(en(f)))
+    assert IDS.index("content") < IDS.index("desc")
+    assert IDS.index("content") < IDS.index("startback") < min(IDS.index(k) for k in button_icons.SETS)
+    init = en("INIT.DAT")          # fonts: Identify's element icons, the icon set, the hint labels (Start/Back)
+    for ident, sb, icons in itertools.product((False, True), (False, True), (None, *button_icons.SETS)):
+        key = ("content",) * ident + ("startback",) * sb + ((icons,) if icons else ())
+        if not key: continue
+        d = button_icons.patch_font(init, icons) if icons else init
+        if sb: d = button_icons.patch_labels(d, icons or "numbers")
+        if ident: d = identify_icons.patch_font(d)
+        yield ("DAT\\INIT.DAT", key, init, d)
     z = zipfile.ZipFile(DESC_ZIP)
     for n in z.namelist():
         f = n.replace(".bps", ".DAT")
         d = bps(en(f), z.read(n))
         yield ("DAT\\" + f, ("desc",), en(f), d)
         if f in P.IDENTIFY_DATS:                                       # both options touch this file
-            yield ("DAT\\" + f, ("identify", "desc"), en(f), P.IDENTIFY_DATS[f](d))
+            yield ("DAT\\" + f, ("content", "desc"), en(f), P.IDENTIFY_DATS[f](d))
 
 def ops(src, dst):
     if not src:                                            # new file (not in the original game)
@@ -130,6 +147,7 @@ def ops(src, dst):
 
 def manifest():
     lines = ["O " + "|".join(o) for o in OPTIONS]
+    assert not any("|" in s for o in OPTIONS for s in o)
     for path, key, src, dst in build_variants():
         o = ops(src, dst)
         assert b"".join(src[a[1]:a[1] + a[2]] if a[0] == "C" else a[1] for a in o) == dst
@@ -139,7 +157,7 @@ def manifest():
 
 CSC = r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 ART = os.path.join(HERE, "art")
-BANNER = (640, 230)                         # must match the banner size in installer.cs
+BANNER = (640, 180)                        # must match the banner size in installer.cs
 WINDOW_BG = (24, 22, 28)                    # Installer.Bg
 
 def make_art(tmp):
@@ -174,7 +192,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     tmp = os.path.join(HERE, "build_tmp"); os.makedirs(tmp, exist_ok=True)
     man = os.path.join(tmp, "manifest.gz")             # deflate: 8 MB -> 2 MB (15 identical DLL variants etc.)
-    with gzip.open(man, "wb", 9) as f: f.write(manifest().encode("ascii"))
+    with gzip.open(man, "wb", 9) as f: f.write(manifest().encode("utf-8"))
     banner, icon = make_art(tmp)
     exe = os.path.join(OUT, "BOF4_Uncut_EN.exe")
     subprocess.run([CSC, "/nologo", "/target:winexe", "/optimize+", f"/out:{exe}", f"/win32icon:{icon}",
