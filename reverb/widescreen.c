@@ -134,17 +134,18 @@ static int hud_mode(int menu_bg) {
 }
 
 /* a piece of the UI layer: plain 2D, or a two-pass frame on the sprite layer (rhw 0.1: the fishing panel's and the
-   Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand; on maps no
-   HUD is drawn there, and a chimney's smoke there would join the compass), not taken by a
+   Enemy(s) box's backdrops; single sprites there are characters and NPCs, which stay where they stand; on maps only
+   opaque ones, the Menu box of map travel and its key labels: a chimney's see-through smoke would join the compass), not taken by a
    backdrop rule (single-pass translucent labels, such as battle's "Enemy(s)", are squeezed but not cut: keep 2) */
 static int g_spr;                                             /* sprite-layer frames count (fishing, battle) */
 static int ui_piece(const Prim *p, const Vtx *v) {
     return (!p->keep || p->keep == 2) && fabsf(v[p->v0].z - UI_Z) < 1e-6f &&
-           (p->flat || (g_spr && p->pair && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
+           (p->flat || (p->pair && (g_spr || !(p->w & 0x20)) && fabsf(v[p->v0].rhw - 0.1f) < 1e-6f));
 }
 
 /* HUD panels to the screen edges: windows (two-pass frames, or tiles flagged 0x4000) that touch or overlap are one
-   panel (neighbouring panels a few pixels apart, such as battle's Enemy(s) and turn boxes, stay separate); a panel
+   panel (neighbouring panels a few pixels apart, such as battle's Enemy(s) and turn boxes, stay separate; a dialogue
+   box of 0x4000 tiles covers the windows drawn before it, the fishing spot's Menu panel, rather than joining them); a panel
    left of the centre moves left by the width of the side bar, one right of it moves right, one across the centre (a
    message box) stays. Every UI piece lying within a panel (its text and icons) moves with it, as does a sprite lying
    wholly inside one and drawn after it (the world map's road arrows, on the map's sprite layer, unlike the roads
@@ -193,7 +194,7 @@ static int grow(void **p, int *cap, int n, int size);
 static int root(int a) { while (g_par[a] != a) a = g_par[a] = g_par[g_par[a]]; return a; }
 static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, float bt, float cx, float k, int sel) {
     float m = (g_spr = (sel & (HUD_ALL | HUD_TOPRIGHT)) != 0, 0.02f * (r - l)), mj = 0.005f * (r - l), dl = cx - (cx - l) * k - l, dr = r - (cx + (r - cx) * k), h = bt - t;
-    int n = 0, i, j;
+    int n = 0, i, j, ci;
     for (j = 0; j < np && n < MAX_PANEL; j++)
         if (ui_piece(&pw[j], v) && !(pw[j].w & 0x2000) && pw[j].w & 4 &&
             !(pw[j].pair && pw[j].w & 0x20 && (pw[j].x1 - pw[j].x0 > 0.1f * (r - l) || pw[j].x0 < l ||  /* not a */
@@ -207,7 +208,8 @@ static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, 
     for (i = 0; i < n; i++)
         for (j = i + 1; j < n; j++) {
             const Prim *a = &pw[g_pi[i]], *b = &pw[g_pi[j]];
-            if (a->x0 - mj <= b->x1 && b->x0 - mj <= a->x1 && a->y0 - mj <= b->y1 && b->y0 - mj <= a->y1)
+            if (a->x0 - mj <= b->x1 && b->x0 - mj <= a->x1 && a->y0 - mj <= b->y1 && b->y0 - mj <= a->y1 &&
+                (a->w & 0x4000 || !(b->w & 0x4000)))    /* a box of tiles drawn over an earlier window covers it */
                 g_par[root(i)] = root(j);
         }
     for (i = 0; i < n; i++) { g_bx[i][0] = g_bx[i][2] = 1e30f; g_bx[i][1] = g_bx[i][3] = -1e30f; g_first[i] = np; g_frame[i] = 0; }
@@ -220,11 +222,13 @@ static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, 
     }
     if (!grow((void **)&g_gi, &g_gi_cap, np, sizeof(int))) return;
     for (i = 0; i < n; i++) g_cnt[i] = 0;
-    for (j = 0; j < np; j++) {                                /* the panel of each piece */
+    for (j = 0, ci = 0; j < np; j++) {                        /* the panel of each piece */
         Prim *p = &pw[j];
         const float *b = NULL;
         float best = 1e30f;
-        if (ui_piece(p, v)) {
+        while (ci < n && g_pi[ci] < j) ci++;
+        if (ci < n && g_pi[ci] == j) b = g_bx[root(ci)];       /* a window: its own panel (not a key icon its size */
+        else if (ui_piece(p, v)) {                              /* that the dialogue box's corner lies near) */
             for (i = 0; i < n; i++) {                            /* the smallest window it lies in */
                 const Prim *c = &pw[g_pi[i]];
                 float cb[4] = { c->x0, c->x1, c->y0, c->y1 }, a = (c->x1 - c->x0) * (c->y1 - c->y0);
@@ -447,6 +451,8 @@ void wide_exec(void *surf, int *rect, int flag) {
         int untex = !(p->w & 4);
         if (p->keep == 1) continue;
         if (p->keep == 3) { for (i = p->v0; i < p->v0 + p->n; i++) v[i].x = cx + (v[i].x - cx) * p->fk + p->fs; continue; }
+        if (p->x1 - p->x0 < 0.02f * (r - l) && p->y1 - p->y0 < 0.02f * (r - l))  /* a speck is never a mask (the */
+            untex = 0;                                  /* Wind Shrine's dust across the edge: whole, not a line) */
         if (p->flat && untex && p->w & 0x20)    /* see-through: a mask only when wide with a corner on the edge (a */
             for (i = p->v0, untex = 0; i < p->v0 + p->n; i++)  /* fade; a beam's or a glow's corner lands there too) */
                 untex |= p->x1 - p->x0 >= 0.25f * (r - l) && (fabsf(v[i].x - l) <= 0.5f || fabsf(v[i].x - r) <= 0.5f);
