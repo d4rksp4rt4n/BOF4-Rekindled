@@ -99,7 +99,7 @@ static TexSpan *tex_span(u32 tex) {
 }
 
 /* the widest gap between x ranges (pieces of one picture lie side by side: no gap wider than a seam) */
-typedef struct { float x0, x1; } Span;
+typedef struct { float x0, x1; int i; } Span;
 static Span *g_sp; static int g_sp_cap, *g_win, g_win_cap;     /* g_win: menu windows of the frame */
 static int span_cmp(const void *a, const void *b) { float d = ((const Span *)a)->x0 - ((const Span *)b)->x0; return (d > 0) - (d < 0); }
 static float max_gap(Span *sp, int n) {
@@ -220,7 +220,9 @@ static void hud_push(Prim *pw, int np, const Vtx *v, float l, float r, float t, 
             (pw[j].pair || pw[j].w & 0x4000 ||
             (sel != HUD_ALL && pw[j].flat && pw[j].x1 - pw[j].x0 >= 0.03f * (r - l) && pw[j].y1 - pw[j].y0 >= 0.03f * h &&
              pw[j].x0 >= l && pw[j].x1 <= r && pw[j].y0 >= t && pw[j].y1 <= bt &&    /* on screen: not a sky tile, */
-             upright(v + pw[j].v0, pw[j].n)))) {                 /* upright: not the Tomb's ghost blocks */
+             upright(v + pw[j].v0, pw[j].n) &&                   /* upright: not the Tomb's ghost blocks, */
+             (g_spr || !(pw[j].w & 0x20))))) {      /* on maps solid: not a glow (chapter 1's column of light); in
+                                                   battle the Enemy(s) box is drawn see-through */
             g_pi[n] = j; g_par[n] = n; n++;
         }
     for (i = 0; i < n; i++)
@@ -307,6 +309,58 @@ static void *low_alloc(u32 n) {                     /* memory below 16 MB, where
     return 0;
 }
 
+/* The map's block rows (exe stub at 0x65ECF9, through [ROWS_VARS], before the rows are listed around the camera
+   focus, [0xB53004] x and edx (z << 8)): the game's radii in blocks (0xBAD81C to [0xB53008], 0xBAD81E to [0xB5300A])
+   keep out the blocks between the camera and its focus (the opening crater's near rim, which otherwise covers the
+   view). Doubled in every direction they came back; here each axis widens by its old radius to the sides and away
+   from the camera, not towards it: the centre moves away from the camera by half the growth on the camera's side.
+   The camera's forward direction is row 2 of its matrix (0xBAD7F4) on the ground plane, scaled so its larger
+   component is 1 (a near top-down view, ground part under half, widens on every side as before). Rectangles
+   (0x65EF90) scale the radii by 181/256 and swap them with mode bit 2 ([0xB5300D]); their rows run along z by
+   [0xB53008], each across x by [0xB5300A]. Diamonds (0x65ED60, mode bit 1) widen by the centre's shift. */
+#define ROWS_VARS 0x6A7FF0     /* [fn][radius a u16][radius b u16][z shift x 256]: the exe's stub (widescreen part) */
+static void __cdecl wide_rows(void) {
+    int mode = MEM(u8, 0xB5300D), ra = MEM(short, 0xBAD81C), rb = MEM(short, 0xBAD81E);
+    float fx = MEM(short, 0xBAD800) / 4096.f, fz = MEM(short, 0xBAD804) / 4096.f, m = fmaxf(fmaxf(fabsf(fx), fabsf(fz)), 0.5f);
+    float gx = fx / m, gz = fz / m, sx, sz;
+    if (mode & 1) {                                              /* diamond |dx| + |dz| <= r */
+        float s = 0.5f * (fabsf(gx) + fabsf(gz));
+        sx = 0.5f * ra * gx; sz = 0.5f * ra * gz;
+        MEM(short, ROWS_VARS + 4) = (short)ceilf(ra * (1 + s)); MEM(short, ROWS_VARS + 6) = (short)ceilf(rb * (1 + s));
+    } else {                                                     /* rectangle: doubled, cut by wide_rect_rows */
+        sx = sz = 0;
+        MEM(short, ROWS_VARS + 4) = (short)(2 * ra); MEM(short, ROWS_VARS + 6) = (short)(2 * rb);
+    }
+    MEM(short, 0xB53004) += (short)lroundf(sx);
+    MEM(int, ROWS_VARS + 8) = (int)lroundf(sz) * 256;
+}
+
+/* A rectangle's rows (instead of 0x65EF90, through [ROWS_VARS + 12]): the doubled rectangle around the centre
+   ([0xB53004] x, [0xB53006] z, in blocks) cut by the line across the view through the game's own rectangle's corner
+   nearest the camera. Blocks between the camera and its focus stay out as in the game; a turned camera's bottom
+   corners, at the same depth as that corner or further, keep their ground (moving the rectangle away from the
+   camera instead left one of them bare). Rows go out from the centre like the game's (0, +1, -1, +2, ... up to but
+   not including -Z), each listed by 0x65EE70 (x from, x to, z, x from, z). */
+#define ROW_FN 0x65EE70
+static void __cdecl wide_rect_rows(void) {
+    int mode = MEM(u8, 0xB5300D), ra = MEM(short, 0xBAD81C), rb = MEM(short, 0xBAD81E);
+    int px = mode & 2 ? ra : rb, pz = mode & 2 ? rb : ra;
+    int x0 = (px * 181 + 128) >> 8, z0 = (pz * 181 + 128) >> 8, X = 2 * x0, Z = 2 * z0, cx = MEM(short, 0xB53004), cz = MEM(short, 0xB53006);
+    int dz, step, n;
+    float fx = MEM(short, 0xBAD800), fz = MEM(short, 0xBAD804), h = sqrtf(fx * fx + fz * fz), nr;
+    if (h < 0.25f * 4096) fx = fz = 0, nr = 0;                   /* near top-down: no side towards the camera */
+    else fx /= h, fz /= h, nr = -(fabsf(fx) * x0 + fabsf(fz) * z0) - 0.01f;   /* the game's nearest corner */
+    MEM(short, 0xB53008) = (short)Z; MEM(short, 0xB5300A) = (short)X;          /* as the game's builder leaves them */
+    for (dz = 0, step = 1, n = 1; dz != -Z; dz += step * n, step = -step, n++) {
+        float lo = (float)-X, hi = (float)X;                      /* fx * dx + fz * dz >= near */
+        if (fx > 1e-4f) lo = fmaxf(lo, ceilf((nr - fz * dz) / fx));
+        else if (fx < -1e-4f) hi = fminf(hi, floorf((nr - fz * dz) / fx));
+        else if (fz * dz < nr) continue;
+        if (lo > hi) continue;
+        ((void (__cdecl *)(int, int, int, int, int))ROW_FN)(cx + (int)lo, cx + (int)hi, cz + dz, cx + (int)lo, cz + dz);
+    }
+}
+
 void wide_exec(void *surf, int *rect, int flag) {
     static int bufs;
     float l = (float)rect[0], r = (float)rect[2], t = (float)rect[1], bt = (float)rect[3], cx = (l + r) * 0.5f, k;
@@ -319,6 +373,8 @@ void wide_exec(void *surf, int *rect, int flag) {
         void *cb = VirtualAlloc(0, BIG_CMD * 8, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         bufs = 1;
         if (vb && cb) { MEM(u32, BUF_VARS + 12) = (u32)(size_t)cb; MEM(u32, BUF_VARS + 8) = (u32)(size_t)vb; }
+        MEM(u32, ROWS_VARS) = (u32)(size_t)wide_rows;           /* block rows from the next frame on */
+        MEM(u32, ROWS_VARS + 12) = (u32)(size_t)wide_rect_rows;
     }
     if (bufs == 1 && VTX_BASE != GAME_VTX) {                   /* bigger polygon pools once the game's vertex buffer is free */
         void *p0 = low_alloc(BIG_POLY * 0x54), *p1 = low_alloc(BIG_POLY * 0x54);
@@ -363,6 +419,18 @@ void wide_exec(void *surf, int *rect, int flag) {
             if (!p->flat && p->w & 4 && fabsf(v[vi].rhw - 0.1f) < 1e-6f && p->x0 <= l + 0.5f && p->x1 >= r - 0.5f &&
                 p->y0 <= t + 0.5f && p->y1 >= bt - 0.5f) p->keep = 1, menu_bg = 1;
         }
+    }
+    /* the screen redrawn from a capture in strips across the whole width, not the whole height (the desert's heat
+       shimmer over the sky, two strips shifted a little sideways): stretched like a full-height one */
+    for (j = 0; j < np; j++) {
+        Prim *p = &g_p[j];
+        float x0 = 1e30f, x1 = -1e30f;
+        if (p->keep || !p->flat || !(p->w & 0x2000) || p->x1 - p->x0 < 0.25f * (r - l)) continue;
+        for (i = 0; i < np; i++)                                 /* its strips: same top and bottom */
+            if (g_p[i].flat && g_p[i].w & 0x2000 && fabsf(g_p[i].y0 - p->y0) <= 0.5f && fabsf(g_p[i].y1 - p->y1) <= 0.5f) {
+                x0 = fminf(x0, g_p[i].x0); x1 = fmaxf(x1, g_p[i].x1);
+            }
+        if (x0 <= l + 0.02f * (r - l) && x1 >= r - 0.02f * (r - l)) p->keep = 1;
     }
     /* a layer made for the 4:3 frame: a run of consecutive textured 2D tiles (one command word) covering the 4:3 width
        and starting or ending exactly at its edge (backdrops, summon skies, cloud layers whose art ends at the edges, a
@@ -416,30 +484,40 @@ void wide_exec(void *surf, int *rect, int flag) {
         }
     }
     /* runs of consecutive textured 2D tiles (one command word) reaching past both 4:3 edges belong to the scene, even
-       when each tile has its own texture (a summon's sky in two halves) and they lie side by side (no gap over 5% of
-       the width; not a battle's party boxes sliding in from both sides with the screen between them: cut like other
-       menus): squeezed but not cut (keep = 2). Except a floor
+       when each tile has its own texture (a summon's sky in two halves): squeezed but not cut (keep = 2). A run is
+       taken apart into groups of tiles lying side by side (no gap over 5% of the width), each judged on its own: a
+       battle's party boxes sliding in from both sides, with the screen between them, are menus, cut like others;
+       the opening's far ground still counts when a tile of the sky beside it shares its command word. Except a floor
        drawn in 2D in perspective (the plains' far ground below the sky: a fan of trapezoids whose top edge, at the
        horizon, spans exactly the 4:3 width): squeezed, its top would leave the 16:9 corners bare, so it is stretched
        with the screen (keep = 1). */
     for (i = 0; i < np; i = j > i ? j : i + 1) {
-        float x0 = 1e30f, x1 = -1e30f;
-        int q, o;
+        int q, o, ns, c0, c;
         for (j = i; j < np && g_p[j].flat && g_p[j].w & 4 && g_p[j].w == g_p[i].w; j++) {
-            x0 = fminf(x0, g_p[j].x0); x1 = fmaxf(x1, g_p[j].x1); g_sp[j - i].x0 = g_p[j].x0; g_sp[j - i].x1 = g_p[j].x1;
+            g_sp[j - i].x0 = g_p[j].x0; g_sp[j - i].x1 = g_p[j].x1; g_sp[j - i].i = j;
         }
-        if (j - i > 1 && x0 < l - 0.5f && x1 > r + 0.5f && max_gap(g_sp, j - i) <= 0.05f * (r - l))
-            for (m = i; m < j; m++) {                            /* row by row (same top and bottom) */
-                float tx0 = 1e30f, tx1 = -1e30f, y0 = g_p[m].y0, y1 = g_p[m].y1;
-                if (g_p[m].keep) continue;
-                for (o = m; o < j; o++)
-                    if (!g_p[o].keep && fabsf(g_p[o].y0 - y0) <= 0.5f && fabsf(g_p[o].y1 - y1) <= 0.5f)
-                        for (q = g_p[o].v0; q < g_p[o].v0 + g_p[o].n; q++)
+        if ((ns = j - i) < 2) continue;
+        qsort(g_sp, ns, sizeof *g_sp, span_cmp);
+        for (c0 = 0; c0 < ns; c0 = c) {                         /* the groups, left to right */
+            float e = g_sp[c0].x1;
+            for (c = c0 + 1; c < ns && g_sp[c].x0 - e <= 0.05f * (r - l); c++) e = fmaxf(e, g_sp[c].x1);
+            if (g_sp[c0].x0 >= l - 0.5f || e <= r + 0.5f) continue;
+            for (m = c0; m < c; m++) {                           /* row by row (same top and bottom) */
+                float tx0 = 1e30f, tx1 = -1e30f, y0 = g_p[g_sp[m].i].y0, y1 = g_p[g_sp[m].i].y1;
+                if (g_p[g_sp[m].i].keep) continue;
+                for (o = m; o < c; o++) {
+                    const Prim *po = &g_p[g_sp[o].i];
+                    if (!po->keep && fabsf(po->y0 - y0) <= 0.5f && fabsf(po->y1 - y1) <= 0.5f)
+                        for (q = po->v0; q < po->v0 + po->n; q++)
                             if (fabsf(v[q].y - y0) <= 0.5f) { tx0 = fminf(tx0, v[q].x); tx1 = fmaxf(tx1, v[q].x); }
-                for (o = m; o < j; o++)
-                    if (!g_p[o].keep && fabsf(g_p[o].y0 - y0) <= 0.5f && fabsf(g_p[o].y1 - y1) <= 0.5f)
-                        g_p[o].keep = fabsf(tx0 - l) <= 0.5f && fabsf(tx1 - r) <= 0.5f ? 1 : 2;
+                }
+                for (o = m; o < c; o++) {
+                    Prim *po = &g_p[g_sp[o].i];
+                    if (!po->keep && fabsf(po->y0 - y0) <= 0.5f && fabsf(po->y1 - y1) <= 0.5f)
+                        po->keep = fabsf(tx0 - l) <= 0.5f && fabsf(tx1 - r) <= 0.5f ? 1 : 2;
+                }
             }
+        }
     }
     /* a fan of untextured 2D triangles round one point reaching past both 4:3 edges (a battle's darkening ring, sized
        for the 4:3 frame): stretched with the screen as one picture. As edge masks, its points past an edge would stay
@@ -486,9 +564,41 @@ void wide_exec(void *surf, int *rect, int flag) {
         if (!p->keep && p->flat && p->w & 4 && !p->pair && (fabsf(p->x0 - l) <= 0.5f || fabsf(p->x1 - r) <= 0.5f) &&
             p->x1 - p->x0 >= 0.25f * (r - l) && p->y1 - p->y0 >= 0.1f * (bt - t) &&
             (s = tex_span(p->tex)) && s->edge == s->n) p->keep = 1;
-        /* single-pass semi-transparent pictures are effects (Blizzard's snow puffs drifting past one edge): squeezed
-           but not cut. Menu windows and their text are drawn opaque or as pairs. */
-        else if (!p->keep && p->flat && p->w & 4 && p->w & 0x20 && !p->pair) p->keep = 2;
+        /* single-pass semi-transparent pictures are effects (Blizzard's snow puffs drifting past one edge; the
+           opening's sand dust, half see-through like a pair's second pass, 0x2): squeezed but not cut. Menu windows and their text
+           are drawn opaque or as pairs. */
+        else if (!p->keep && p->flat && p->w & 4 && p->w & 0x22 && !p->pair) p->keep = 2;
+    }
+    /* a sky drawn as a ring: four equal 2D tiles side by side in one row (within 1%: rounding makes one 1539 wide
+       next to 1536; not Mudflow's slanted mesh), wider than two screens (the opening's: 256 PS1 pixels each, laid
+       out from the tile under the left edge to far past the right one). The panorama is three tiles: the fourth
+       only fills the rest and shows anything (another sky's tile, or black later in the same shot). The 4:3 frame
+       is always covered, the 16:9 sides not: when the left end would show, the third tile (off screen, the left
+       neighbour of the first) moves to the front. All its tiles are the sky: squeezed, not cut. */
+    for (j = 0; j < np; j++) {
+        const Prim *a = &g_p[j];
+        float w = a->x1 - a->x0, xl = cx - (cx - l) / k, xr = cx + (r - cx) / k, d;
+        int ns = 0, q, o;
+        if (!a->flat || !(a->w & 4) || a->keep == 1 || a->keep == 3 || w < 0.5f * (r - l) || a->n != 4 ||
+            fabsf(v[a->v0].z - UI_Z) > 1e-6f || a->x0 > l || a->x1 < l || !upright(v + a->v0, 4)) continue;
+                                                                /* an upright tile across the left 4:3 edge */
+        for (o = 0; o < np; o++) {                               /* its row: same top, bottom and width */
+            const Prim *b = &g_p[o];
+            if (b->flat && b->w & 4 && b->keep != 1 && b->keep != 3 && b->n == 4 && upright(v + b->v0, 4) && fabsf(b->y0 - a->y0) <= 0.5f &&
+                fabsf(b->y1 - a->y1) <= 0.5f && fabsf(b->x1 - b->x0 - w) <= 0.01f * w) { g_sp[ns].x0 = b->x0; g_sp[ns].x1 = b->x1; g_sp[ns++].i = o; }
+        }
+        if (ns != 4) continue;
+        qsort(g_sp, ns, sizeof *g_sp, span_cmp);
+        for (q = 1; q < ns && fabsf(g_sp[q].x0 - g_sp[q - 1].x1) <= 0.01f * w; q++) ;
+        if (q < ns || g_sp[ns - 1].x1 - g_sp[0].x0 < 2 * (r - l)) continue;   /* side by side, wider than two screens */
+        d = g_sp[0].x0 - g_sp[3].x0;                             /* three tiles back */
+        if (g_sp[0].x0 > xl + 0.5f && g_sp[2].x0 >= xr) {
+            Prim *b = &g_p[g_sp[2].i];
+            for (q = b->v0; q < b->v0 + b->n; q++) v[q].x += d;
+            b->x0 += d; b->x1 += d;
+        }
+        for (q = 0; q < ns; q++) g_p[g_sp[q].i].keep = 2;
+        break;                                                   /* one sky per frame */
     }
     if ((m = hud_mode(menu_bg)) != 0) hud_push(g_p, np, v, l, r, t, bt, cx, k, m);
     /* menu windows cut at the 4:3 edge (solid two-pass frames, tiles flagged 0x4000; not HUD panels at the screen

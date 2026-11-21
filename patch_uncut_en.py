@@ -527,8 +527,16 @@ WIDE_CODE = ((0x50C835, b"\x66\x3d\x60\x01", b"\x66\x3d\xb0\x01"),       # cmp a
 # that doubles both afterwards (the far top corners of a tilted view need much more than the 4/3 of the width).
 # Before that, 0x65ED60 / 0x65EF90 list the block rows to consider from the same radii in blocks (14 x 8 by default; a
 # diamond |dx| + |dz| <= r for some maps, which left a diagonal staircase at the top corners): the load at 0x65ECF9 goes
-# through a stub that doubles them too (28 rows each way; the list holds 64).
+# through a stub that widens them too (28 rows each way at most; the list holds 64). The rows decide which blocks
+# are drawn, and the game keeps those between the camera and its focus out of them (the crater's near rim in the
+# opening, which otherwise covers the view): once the DLL has set [ROWS_VARS] (bof4_wide_rows in widescreen.c), the
+# stub takes the radii and the centre's shift from it, which widens the rows to the sides and away from the camera
+# only; before that (or without the DLL) it doubles them. A rectangle's rows (0x65EF90, called at RECT_SITE) come
+# from the DLL too once it has set [ROWS_VARS + 12]: the doubled rectangle cut by the line across the view through
+# the game's own rectangle's nearest corner (a turned camera's bottom corners then still have their ground).
 WIDE_WINDOW = 0x6A7F00             # after the sprites stub, same .text padding
+ROWS_VARS = 0x6A7FF0               # [fn][radius a u16][radius b u16][z centre shift x 256][rect fn], end of the window stub
+RECT_SITE, RECT_FN = 0x65ED47, 0x65EF90
 WINDOW_FN, WINDOW_CALLS = 0x660A20, (0x65ED3C, 0x65ED4C, 0x660926)
 SPAN_SITE = 0x65ECF9
 SPAN_LOAD = H("66a11cd8ba00" "668b0d1ed8ba00")          # mov ax, [0xBAD81C]; mov cx, [0xBAD81E]
@@ -604,9 +612,18 @@ def window_code():
     c += b"\x3d\x00\x04\x00\x00\x7c\x0a"                # cmp eax, 0x400; jl +10
     c += b"\xc7\x05" + struct.pack("<I", OTZ) + struct.pack("<I", 0x3FE)   # mov dword [OTZ], 0x3FE
     c += b"\x58" + OTZ_CMP + b"\xc3"                     # pop eax; cmp word [OTZ], 0x400; ret
-    span = WIDE_WINDOW + len(c)
-    c += SPAN_LOAD + b"\x66\x01\xc0\x66\x01\xc9\xc3"     # (the two loads); add ax, ax; add cx, cx; ret
     a32 = lambda v: struct.pack("<I", v)
+    span = WIDE_WINDOW + len(c)                          # the block rows' radii (and centre), see ROWS_VARS
+    c += b"\x83\x3d" + a32(ROWS_VARS) + b"\x00\x74\x1c"  # cmp dword [fn], 0; je plain
+    c += b"\x60\xff\x15" + a32(ROWS_VARS) + b"\x61"      # pushad; call [fn]; popad
+    c += b"\x66\xa1" + a32(ROWS_VARS + 4)                # mov ax, [radius a]
+    c += b"\x66\x8b\x0d" + a32(ROWS_VARS + 6)            # mov cx, [radius b]
+    c += b"\x03\x15" + a32(ROWS_VARS + 8) + b"\xc3"      # add edx, [z centre shift x 256]; ret
+    c += SPAN_LOAD + b"\x66\x01\xc0\x66\x01\xc9\xc3"     # plain: (the two loads); add ax, ax; add cx, cx; ret
+    rect = WIDE_WINDOW + len(c)                          # the rectangle's row list (RECT_SITE), see ROWS_VARS
+    c += b"\x83\x3d" + a32(ROWS_VARS + 12) + b"\x00\x74\x06"   # cmp dword [rect fn], 0; je orig
+    c += b"\xff\x25" + a32(ROWS_VARS + 12)                # jmp [rect fn]
+    c += b"\xe9" + rel(WIDE_WINDOW + len(c) + 5, RECT_FN) # orig: jmp 0x65EF90
     here = lambda: WIDE_WINDOW + len(c)
     loaded = here(); c += bytes(4)                                         # [loaded][pad3]
     f_movie = here(); c += bytes(4)                                        # bof4_movie, or the original BeginScene
@@ -630,7 +647,9 @@ def window_code():
     labels = {"dll": here()}; c += b"bof4_reverb.dll\0"
     labels["fn"] = here(); c += b"bof4_movie\0"
     for pos, label in fix: c[pos:pos + 4] = a32(labels[label])
-    return bytes(c), otz, span, movie
+    assert here() <= ROWS_VARS
+    c += bytes(ROWS_VARS + 16 - here())                                    # [fn][radius a][radius b][z shift][rect fn]
+    return bytes(c), otz, span, movie, rect
 
 def wide_culls(d):
     """[(file offset, new bytes)]; asserts every site's original instructions."""
@@ -789,9 +808,10 @@ def patch_exe(d, parts=EXE_PARTS):
         make_text_writable(d)                              # stub data lives in the cave
     if "fps60" in parts:
         d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
-    wc, otz, span, movie = window_code()
+    wc, otz, span, movie, rect = window_code()
     assert WIDE_WINDOW >= SPR + len(spr_code()[0]) and WIDE_WINDOW + len(wc) <= 0x6A8000
     assert d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] == SPAN_LOAD, f"unexpected code at {SPAN_SITE:#x}"
+    assert d[fo(RECT_SITE):fo(RECT_SITE) + 5] == b"\xe8" + rel(RECT_SITE + 5, RECT_FN), f"unexpected code at {RECT_SITE:#x}"
     for site in MOVIE_SITES:
         assert d[fo(site):fo(site) + len(MOVIE_ORIG)] == MOVIE_ORIG, f"unexpected code at {site:#x}"
     for site in WINDOW_CALLS:
@@ -807,6 +827,7 @@ def patch_exe(d, parts=EXE_PARTS):
         for site in OTZ_SITES:                              # call stub; nop x4; (jae skip as before)
             d[fo(site):fo(site) + 9] = b"\xe8" + rel(site + 5, otz) + b"\x90" * 4
         d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] = b"\xe8" + rel(SPAN_SITE + 5, span) + b"\x90" * 8
+        d[fo(RECT_SITE):fo(RECT_SITE) + 5] = b"\xe8" + rel(RECT_SITE + 5, rect)
         for site in MOVIE_SITES:
             d[fo(site):fo(site) + len(MOVIE_ORIG)] = b"\xe8" + rel(site + 5, movie) + b"\x90" * 6
         bc, reset, esp28, ebp, esp34, cmp, pool = bufs_code()   # frame buffers through variables (bigger from the DLL)

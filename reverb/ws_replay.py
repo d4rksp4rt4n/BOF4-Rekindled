@@ -15,7 +15,7 @@ HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static unsigned int g_vtx_mem[(1 << 18) * 8], g_vtx_end, g_cmd_mem[1 << 18], g_cmd_end, g_bufvars[6];
+static unsigned int g_vtx_mem[(1 << 18) * 8], g_vtx_end, g_cmd_mem[1 << 18], g_cmd_end, g_bufvars[6], g_rowvars[4];
 static int g_n_prim, g_pv0[1 << 16], g_pn[1 << 16];
 static unsigned char g_fish_mem[16], g_state[3];          /* program number, block mode, Camp menu flag */
 static void on_exec(void);
@@ -70,6 +70,7 @@ def sub(s, a, b):
 def build(src_text, name):
     d = os.path.join(OUT, name); os.makedirs(d, exist_ok=True)
     s = src_text.replace("\r\n", "\n")
+    s = s.replace("#define ROWS_VARS 0x6A7FF0", "#define ROWS_VARS ((size_t)g_rowvars)")   # older versions have none
     if "#define BUF_VARS 0x6A7C60" in s:                     # the buffers' addresses in the exe's variables
         s = sub(s, "#define BUF_VARS 0x6A7C60", "#define BUF_VARS ((size_t)g_bufvars)")
     else:
