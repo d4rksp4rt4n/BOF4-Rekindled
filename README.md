@@ -2,6 +2,9 @@
 
 *Formerly "Breath of Fire IV – English Uncut". Installs made with the old installer are picked up as they are.*
 
+> **This page describes the version in development.** Widescreen and the Controller options are not in
+> the current release (1.2) yet; they are still being tested.
+
 A patcher for the English GOG release of *Breath of Fire IV* that restores content cut from the Western
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
 option can be switched on or off, and "Restore original files" undoes everything. 
