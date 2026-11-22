@@ -34,5 +34,5 @@ if __name__ == "__main__":
     assert out.count("\n") > 100
     for line in out.splitlines():                          # round trip: applying the list gives patch_exe's sections
         va, o, n = line.split(); assert len(o) == len(n) and o != n
-    open(sys.argv[1] if len(sys.argv) > 1 else "BOF4_Uncut_EN.mem", "w", newline="\n").write(out)
+    open(sys.argv[1] if len(sys.argv) > 1 else "BOF4_Rekindled.mem", "w", newline="\n").write(out)
     print(out.count("\n"), "sites")

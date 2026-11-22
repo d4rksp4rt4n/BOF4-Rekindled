@@ -1,4 +1,6 @@
-# Breath of Fire IV – English Uncut & fixes (GOG PC)
+# BOF4 Rekindled – Breath of Fire IV uncut content, fixes and enhancements (GOG PC)
+
+*Formerly "Breath of Fire IV – English Uncut". Installs made with the old installer are picked up as they are.*
 
 A patcher for the English GOG release of *Breath of Fire IV* that restores content cut from the Western
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
@@ -26,9 +28,9 @@ The installer explains each option when you point at it.
 
 1. You need the English GOG version of Breath of Fire IV. The installer checks every file and refuses
    to change anything that isn't the original English GOG data.
-2. Download `BOF4_Uncut_EN.exe` from this repository's **Releases** page, put it next to `BOF4.exe`
-   and run it. Tick the options you want and press **Apply**.
-3. Originals are kept in `BOF4_Uncut_EN_backup`. Run the installer again any time to change options or
+2. Download `BOF4_Rekindled.exe` from this repository's **Releases** page, put it next to `BOF4.exe`
+   and run it. Switch on the options you want and press **Apply**.
+3. Originals are kept in `BOF4_Rekindled_backup`. Run the installer again any time to change options or
    to restore the original files. On start it checks GitHub for a newer release and shows a link if
    there is one (nothing is downloaded or sent).
 
@@ -73,7 +75,7 @@ did, where you were in the game, and, if possible, a save file.
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
 | No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Report rooms that still swim, or characters whose size looks wrong or jumps |
-| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Uncut_EN.log`. Apply and Restore remove the `version.dll` of the earlier test build. Reports from Steam owners (with that log) are very welcome |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Rekindled.log`. Apply and Restore remove the `version.dll` of the earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -97,7 +99,7 @@ reverb\build.bat
 steam\build.bat
 py build_mod.py
 ```
-`build_mod.py` writes `mod\BOF4_Uncut_EN.exe`. The installer embeds only the differences from the original
+`build_mod.py` writes `mod\BOF4_Rekindled.exe`. The installer embeds only the differences from the original
 files, plus SHA-256 checks, for every combination of options.
 
 The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`) also needs `ffmpeg`

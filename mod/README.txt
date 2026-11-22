@@ -1,7 +1,7 @@
-Breath of Fire IV - English Uncut 1.2 (GOG; Steam experimental)
+BOF4 Rekindled 1.2 (GOG; Steam experimental)
 ============================================================
 
-Run BOF4_Uncut_EN.exe, check the game folder, switch on the options you want and press Apply.
+Run BOF4_Rekindled.exe, check the game folder, switch on the options you want and press Apply.
 The installer explains each option when you point at it. Content and fixes are on by default;
 enhancements are experimental and off by default.
 
@@ -59,9 +59,9 @@ Enhancements (experimental, off by default)
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
 Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected
-(encrypted), so the installer leaves it untouched and adds dsound.dll and BOF4_Uncut_EN.mem
+(encrypted), so the installer leaves it untouched and adds dsound.dll and BOF4_Rekindled.mem
 instead: dsound.dll passes sound on to Windows' own dsound.dll and, when the game starts its
-sound, applies the same changes in memory and writes the result to BOF4_Uncut_EN.log.
+sound, applies the same changes in memory and writes the result to BOF4_Rekindled.log.
 (A version.dll from an earlier test build is removed by Apply and Restore.)
 Please report how it went (with that log) on the GitHub page.
 Other versions are refused: the installer recognises only the GOG and Steam files.
@@ -77,11 +77,11 @@ install without "Restore cut content" for that playthrough.
 
 On start, the installer asks GitHub whether a newer release is out and shows a link if so.
 You can run it again at any time to change the options. "Restore original files" undoes
-everything; originals are kept in BOF4_Uncut_EN_backup.
+everything; originals are kept in BOF4_Rekindled_backup.
 The installer checks every file before changing anything. It refuses to run on files that
 aren't the original English GOG ones, e.g. if the German patch's DAT files are installed.
 
-Files changed: BOF4.exe (Steam: dsound.dll and BOF4_Uncut_EN.mem added instead), bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
+Files changed: BOF4.exe (Steam: dsound.dll and BOF4_Rekindled.mem added instead), bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
 (store), INIT, AB000_00, BTLEND (Identify), AB000_00, CAMP, COMMU03, MASTER, MSHOP, SGAMEN, SHOP
 (descriptions).
 

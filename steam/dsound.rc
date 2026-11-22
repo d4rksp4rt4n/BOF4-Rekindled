@@ -9,14 +9,14 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "BOF4 English Uncut project"
-      VALUE "FileDescription", "Breath of Fire IV English Uncut - Steam patch loader"
+      VALUE "CompanyName", "BOF4 Rekindled project"
+      VALUE "FileDescription", "BOF4 Rekindled - Steam patch loader"
       VALUE "FileVersion", "1.0.0.0"
       VALUE "InternalName", "dsound"
       VALUE "OriginalFilename", "dsound.dll"
-      VALUE "ProductName", "Breath of Fire IV English Uncut"
+      VALUE "ProductName", "BOF4 Rekindled"
       VALUE "ProductVersion", "1.0.0.0"
-      VALUE "Comments", "Applies the English Uncut patch list to BOF4.exe in memory; forwards DirectSound to the system dsound.dll"
+      VALUE "Comments", "Applies the BOF4 Rekindled patch list to BOF4.exe in memory; forwards DirectSound to the system dsound.dll"
     END
   END
   BLOCK "VarFileInfo"

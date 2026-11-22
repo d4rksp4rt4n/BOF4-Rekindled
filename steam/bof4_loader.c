@@ -3,8 +3,8 @@
 // the system dsound.dll (loaded on first use). The game's first DirectSoundCreate call comes from its own (by then unpacked)
 // code: there, if every patch site holds the GOG bytes, the same bytes the installer writes into the GOG
 // exe are written in memory, then the call goes on to the real DirectSoundCreate.
-// Patch list: BOF4_Uncut_EN.mem next to this DLL, one "VA ORIGHEX NEWHEX" line per site (written by the
-// installer). If the bytes don't match (another build), nothing is changed. Result: BOF4_Uncut_EN.log.
+// Patch list: BOF4_Rekindled.mem next to this DLL, one "VA ORIGHEX NEWHEX" line per site (written by the
+// installer). If the bytes don't match (another build), nothing is changed. Result: BOF4_Rekindled.log.
 // No C runtime: built with /NODEFAULTLIB /ENTRY:DllMain /GS-.
 #include <windows.h>
 
@@ -49,7 +49,7 @@ static void log_line(const char *fmt, ...)
     DWORD w;
     va_list a;
     int n;
-    lstrcpyA(path, dir); lstrcatA(path, "BOF4_Uncut_EN.log");
+    lstrcpyA(path, dir); lstrcatA(path, "BOF4_Rekindled.log");
     va_start(a, fmt); n = wvsprintfA(buf, fmt, a); va_end(a);
     buf[n++] = '\n';
     f = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, 0, NULL);
@@ -96,9 +96,9 @@ static int load_list(void)
     HANDLE f, heap = GetProcessHeap();
     DWORD size, got;
     int cap = 0;
-    lstrcpyA(path, dir); lstrcatA(path, "BOF4_Uncut_EN.mem");
+    lstrcpyA(path, dir); lstrcatA(path, "BOF4_Rekindled.mem");
     f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    if (f == INVALID_HANDLE_VALUE) { log_line("no BOF4_Uncut_EN.mem: nothing to do"); return 0; }
+    if (f == INVALID_HANDLE_VALUE) { log_line("no BOF4_Rekindled.mem: nothing to do"); return 0; }
     size = GetFileSize(f, NULL);
     text = HeapAlloc(heap, 0, size + 1);
     ReadFile(f, text, size, &got, NULL);
@@ -119,7 +119,7 @@ static int load_list(void)
         if (!(b = word(&p))) continue; be = p;
         o = HeapAlloc(heap, 0, (ae - a) / 2 + 1); r = HeapAlloc(heap, 0, (be - b) / 2 + 1);
         no = hex(a, ae, o); nr = hex(b, be, r);
-        if (v < ve || no <= 0 || no != nr) { log_line("bad line in BOF4_Uncut_EN.mem: %s", line); return n_sites = 0; }
+        if (v < ve || no <= 0 || no != nr) { log_line("bad line in BOF4_Rekindled.mem: %s", line); return n_sites = 0; }
         if (n_sites == cap)
             sites = sites ? HeapReAlloc(heap, 0, sites, (cap *= 2) * sizeof *sites)
                           : HeapAlloc(heap, 0, (cap = 256) * sizeof *sites);
