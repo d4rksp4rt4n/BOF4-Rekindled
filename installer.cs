@@ -92,7 +92,7 @@ class Installer : Form
         return r;
     }
     public const string Version = "1.2";           // release tag on GitHub: "1.2" or "1.2.0"
-    const string Repo = "d4rksp4rt4n/bof4-english-uncut";
+    const string Repo = "d4rksp4rt4n/BOF4-Rekindled";
     readonly LinkLabel update = new LinkLabel { Visible = false, AutoSize = true };
     const string BackupDir = "BOF4_Uncut_EN_backup";
     // Steam: BOF4.exe is the GOG exe inside an Enigma wrapper (encrypted on disk), so it stays untouched and
@@ -203,7 +203,7 @@ class Installer : Form
     }
 
     static readonly string[][] Credits = {
-        new[] { "Project page, updates, issues", "github.com/d4rksp4rt4n/bof4-english-uncut", "https://github.com/d4rksp4rt4n/bof4-english-uncut" },
+        new[] { "Project page, updates, issues", "github.com/d4rksp4rt4n/BOF4-Rekindled", "https://github.com/d4rksp4rt4n/BOF4-Rekindled" },
         new[] { "Restored scene scripts, text", "navarchos - Breath of Fire IV Uncensored (PS1)", "https://www.romhacking.net/hacks/7192/" },
         new[] { "Better Descriptions", "Naro", "https://www.romhacking.net/hacks/9575/" },
         new[] { "Dengeki Store graphics", "Japanese GOG release of Breath of Fire IV (Capcom)", null },
