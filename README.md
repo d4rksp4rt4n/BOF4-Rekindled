@@ -4,18 +4,23 @@ A patcher for the English GOG release of *Breath of Fire IV* that restores conte
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
 option can be switched on or off, and "Restore original files" undoes everything. 
 
-| Option | What it does |
-|---|---|
-| Restore cut scenes | Ryu/Ursula at the checkpoint, Ursula on Zig's ship, Emperor Soniel's attack on Fou-Lu and the Saldine Island bath scene, with English text |
-| Unlock the Dengeki Store | The Japan-only store, with its original English (US PlayStation) text and the graphics the English port dropped |
-| Stutter fix | The per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches) |
-| PlayStation reverb | The PC music is dry MP3 recordings; this adds the PS1 sound chip's reverb back at runtime, using the PS1 game's own setting |
-| Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
-| Scias learns Identify | Restores the cut Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
-| Better Descriptions | Naro's descriptions of hidden item, equipment and master effects |
-| 60 fps (experimental) | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Off by default; Scroll Lock switches it off and on while playing |
-| No PS1 wobble | In rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
-| Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Off by default; Insert switches between shrink only, full perspective and off while playing |
+The options come in three groups. Content and fixes are on by default; enhancements are experimental and
+off by default.
+
+| Group | Option | What it does |
+|---|---|---|
+| Restored content | Restore cut content | Everything the English release removed: the four cut scenes (Ryu and Ursula at the checkpoint, Ursula on Zig's ship, Emperor Soniel's attack on Fou-Lu, the Saldine Island bath scene) with English text; the Japan-only Dengeki Store, with its original English (US PlayStation) text and the graphics the English port dropped; and Scias' Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
+| | Better Descriptions (by Naro) | Naro's descriptions of hidden item, equipment and master effects and resistances |
+| Fixes | PC port fixes | Stutter: the per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches). Wobble: in rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
+| | Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
+| | PlayStation reverb | The PC music is dry MP3 recordings; this adds the PS1 sound chip's reverb back at runtime, using the PS1 game's own setting |
+| Enhancements (experimental) | 60 fps | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Scroll Lock switches it off and on while playing |
+| | Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Insert switches between shrink only, full perspective and off while playing |
+
+> **The enhancements (60 fps, Sprite depth scaling) are work in progress: expect visual glitches.** Switch them
+> off if something looks wrong, and please report it.
+
+The installer explains each option when you point at it.
 
 ## For players
 
@@ -68,7 +73,7 @@ did, where you were in the game, and, if possible, a save file.
 | Scias learns Identify | Tested in game: HP, Exp, treasure, info, and the element icons with their weak/normal/strong colours |
 | **60 fps** | **Experimental.** Tested in towns, fields, the world map, battles, menus, dialogue and the fishing minigame. Report anything that flickers, jumps or tears only with the option on (Scroll Lock compares), ideally with a capture (see above) |
 | No PS1 wobble, sprite depth scaling | **New.** Tested in North Chamba and Synesta. Report rooms that still swim, or characters whose size looks wrong or jumps |
-| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `version.dll`, which applies the same exe changes in memory once the game has unpacked, and logs the result to `BOF4_Uncut_EN.log`. Reports from Steam owners (with that log) are very welcome |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Uncut_EN.log`. Apply and Restore remove the `version.dll` of the earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -112,7 +117,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `identify_icons.py` | the Identify screen's element icons (font glyphs, labels); run it for a preview image |
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
-| `steam\` | Steam loader: `version.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
+| `steam\` | Steam loader: `dsound.dll` proxy (`bof4_loader.c`) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
 | `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures) and sprite depth scaling (`sprites.c`) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |
