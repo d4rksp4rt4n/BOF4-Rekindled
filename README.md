@@ -235,7 +235,24 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 
 ## AI use
 
-This mod was made with help from an AI coding assistant (Claude Code).
+## AI use
+
+This mod was developed with substantial assistance from an AI coding assistant (Claude Code / Claude).
+
+**What the AI did**
+- Wrote and iterated large amounts of the supporting tooling: Python scripts for scene derivation (`derive_scenes.py`), icon generation (`identify_icons.py`, `button_icons.py`), DAT handling (`lzhuf.py`), the build system (`build_mod.py`), loop analysis, and the Steam loader helper scripts.
+- Generated and refined the C code for the runtime DLL (`bof4_reverb.c`, `loops.c`, `fps60.c`, `sprites.c`, `widescreen.c`) and the installer (`installer.cs`), including the code caves, hooks, buffer management, and the various experimental features (60 fps interpolation, widescreen culling/margins, sprite depth scaling, controller remapping and button icons).
+- Helped reverse-engineer structures, locate relevant code paths in the GOG executable, and propose approaches for restoring cut scenes, fixing the Identify layout, re-adding Dengeki Store data, and implementing the PS1-style reverb and loop points.
+- Produced documentation drafts, commit messages, and explanatory comments that were then edited.
+
+**What I did**
+- Directed the overall design, priorities, and feature set (which cut content to restore, which PC-port problems to fix, which experimental options to expose, default on/off states, etc.).
+- Supplied the game files, PS1 disc images, existing hacks (navarchos’ Uncensored and Identify), and the Better Descriptions package as ground truth.
+- Tested every change in-game across multiple areas, battles, menus, and the fishing minigame; reported bugs, edge cases, visual/audio problems, and performance issues back to the AI for further iteration.
+- Reviewed, edited, simplified, or rewrote AI-generated code and text for correctness, style, safety (SHA-256 checks, backup handling, option independence), and maintainability.
+- Made the final decisions on what shipped, what stayed experimental, the installer UX, the tuning options in `BOF4_reverb.ini`, and the wording of this README.
+
+In short: the AI accelerated the coding and exploration work dramatically; the design, verification, and final product remain human-directed.
 
 ## License
 
