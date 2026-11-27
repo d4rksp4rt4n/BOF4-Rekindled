@@ -7,7 +7,7 @@ import base64, gzip, hashlib, itertools, os, subprocess, zipfile, zlib
 import config
 import patch_uncut_en as P
 import button_icons, identify_icons
-from steam.mem_list import mem_list
+from steam.mem_list import option_mem, check as check_mem
 import sys; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loops"))
 import boss_victory                                            # loops/: renders from the PS1 disc (config.py)
 
@@ -95,13 +95,14 @@ def bps(src, p):
 def build_variants():
     """Yields (path, key, original, patched), key = tuple of option ids applied, in IDS order (255 exe variants)."""
     en = lambda f: open(os.path.join(config.CLEAN_DAT, f), "rb").read()
+    # BOF4.exe stays untouched (GOG and Steam): dsound.dll applies the exe options in memory, per option, from
+    # BOF4_Rekindled.mem; the installer writes the chosen ones into BOF4_Rekindled.ini
     exe = open(config.CLEAN_EXE, "rb").read()
-    for n in range(1, len(EXE_OPTS) + 1):
-        for key in itertools.combinations(EXE_OPTS, n):
-            patched = P.patch_exe(exe, [p for i in key for p in PARTS.get(i, (i,))] + list(ALWAYS))
-            yield ("BOF4.exe", key, exe, patched)
-            # Steam: the same patch, applied in memory by the loader (steam\dsound.dll)
-            yield ("BOF4_Rekindled.mem", key, b"", mem_list(exe, patched).encode())
+    patch = lambda parts: P.patch_exe(exe, parts)
+    opts = [(i, PARTS.get(i, (i,))) for i in EXE_OPTS]
+    mem = option_mem(exe, patch, opts, ALWAYS)
+    print(check_mem(exe, patch, opts, ALWAYS, mem), "option combinations: loader result = patch_exe")
+    yield ("BOF4_Rekindled.mem", ("loader",), b"", mem.encode())
     yield ("dsound.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "dsound.dll"), "rb").read())
     # boss victory themes: song 1 of the two boss music files, rendered from the PS1 disc (loops/boss_victory.py)
     table = open(os.path.join(HERE, "reverb", "loops_table.h")).read()
@@ -167,6 +168,8 @@ def ops(src, dst):
 def manifest():
     lines = ["O " + "|".join(o) for o in OPTIONS]
     assert not any("|" in s for o in OPTIONS for s in o)
+    exe = open(config.CLEAN_EXE, "rb").read()
+    lines.append("E " + sha(exe) + " " + " ".join(EXE_OPTS))   # untouched GOG exe; options the loader applies
     for path, key, src, dst in build_variants():
         o = ops(src, dst)
         assert b"".join(src[a[1]:a[1] + a[2]] if a[0] == "C" else a[1] for a in o) == dst

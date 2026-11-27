@@ -88,10 +88,12 @@ Controller (experimental, off by default)
     cross, circle, square, triangle, L1, R1, Select, Start, L3, R3.
 
 Needs only the English GOG version. No d3d9.dll or other patch is required.
+BOF4.exe stays untouched: the installer adds dsound.dll, BOF4_Rekindled.mem and
+BOF4_Rekindled.ini instead. dsound.dll passes sound on to Windows' own dsound.dll and applies
+the chosen options' changes to the game in memory when it starts (result in BOF4_Rekindled.log).
+An exe patched by an earlier version of this mod is put back to the original by Apply.
 Steam version: experimental, not yet tested on a real Steam install. Its BOF4.exe is protected
-(encrypted), so the installer leaves it untouched and adds dsound.dll and BOF4_Rekindled.mem
-instead: dsound.dll passes sound on to Windows' own dsound.dll and, when the game starts its
-sound, applies the same changes in memory and writes the result to BOF4_Rekindled.log.
+(encrypted); the same dsound.dll applies the changes when the game starts its sound.
 (A version.dll from an earlier test build is removed by Apply and Restore.)
 Please report how it went (with that log) on the GitHub page.
 Other versions are refused: the installer recognises only the GOG and Steam files.
@@ -111,9 +113,9 @@ everything; originals are kept in BOF4_Rekindled_backup.
 The installer checks every file before changing anything. It refuses to run on files that
 aren't the original English GOG ones, e.g. if the German patch's DAT files are installed.
 
-Files changed: BOF4.exe (Steam: dsound.dll and BOF4_Rekindled.mem added instead), bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
+Files changed: dsound.dll, BOF4_Rekindled.mem, BOF4_Rekindled.ini, bof4_reverb.dll (added) and DAT\ AREAM027, AREAD157, AREAD145 (scenes), AREAD068, AREAS052
 (store), INIT, AB000_00, BTLEND (Identify), AB000_00, CAMP, COMMU03, MASTER, MSHOP, SGAMEN, SHOP
-(descriptions), INIT (button icons).
+(descriptions), INIT (button icons), BGM008, BGM016 (boss victory themes).
 
 Credits
   - Restored scene scripts and English lines: navarchos' "Breath of Fire IV Uncensored" PS1 hack

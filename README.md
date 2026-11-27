@@ -39,7 +39,7 @@ Notes:
 - **Saves past Saldine:** a save made in the unmodded game after the party reached the Saldine Island
   creek will freeze when it enters the creek with "Restore cut content" on, because the bath scene still
   counts as unseen. Use an earlier save, or play that save without that option.
-- **Windows warnings:** the installer is unsigned, edits `BOF4.exe` and adds a DLL, so Windows SmartScreen
+- **Windows warnings:** the installer is unsigned and adds DLLs (`dsound.dll`, which applies the exe changes in memory, and `bof4_reverb.dll`), so Windows SmartScreen
   or antivirus software may warn about it. The full source is here; you can build it yourself.
 - **Music tuning:** optional `BOF4_reverb.ini` next to `BOF4.exe`:
   ```ini
@@ -83,7 +83,8 @@ did, where you were in the game, and, if possible, a save file.
 | PC port fixes (wobble), sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
 | **PC port fixes (darkening effects), fast-forward** | **New.** Tested in game: Fou-Lu's sword swipe (white, as on the PS1) and fast-forward at every speed. Report an effect that looks different from the PS1 only with the option on, or anything that breaks at a higher speed |
 | **Music loops (boss victory themes)** | **New.** Rendered from the PS1 music data; checked against Dragnier's PS1 recordings by ear and against the PC recordings of the normal versions (same pitch, tone curve and balance fitted). Report a boss victory that sounds wrong or loops badly |
-| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Rekindled.log`. Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
+| **Exe changes in memory** | **New.** `BOF4.exe` stays untouched on GOG too: `dsound.dll` (forwarding sound to the system `dsound.dll`) applies the chosen options' exe changes in memory from `BOF4_Rekindled.mem`, before the game's code runs, and logs the result to `BOF4_Rekindled.log`; the installer lists the options in `BOF4_Rekindled.ini`. Tested on a clean GOG install: install, option changes, restore, and moving from an exe patched by an earlier version (Apply puts the original back) |
+| **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The same `dsound.dll` applies the exe changes at the game's first DirectSound call (after it has unpacked). Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
 
@@ -129,7 +130,7 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
 | `button_icons.py` | Xbox/PlayStation button icons in place of the circled numbers (font glyphs); run it for a preview image |
 | `derive_scenes.py` | derives the scene redirects from the US PS1 disc and the Uncensored hack |
 | `installer.cs` | the GUI installer (WinForms) |
-| `steam\` | Steam loader: `dsound.dll` proxy (`bof4_loader.c`, no C runtime) that patches the unpacked exe in memory; `mem_list.py` makes its patch list |
+| `steam\` | The loader (GOG and Steam): `dsound.dll` proxy (`bof4_loader.c`, no C runtime) that applies the chosen options' exe changes in memory; `mem_list.py` makes its patch list, one section per option (`build_mod.py` checks that every combination gives exactly `patch_exe`'s bytes) |
 | `reverb\` | `bof4_reverb.dll`: PS1 SPU reverb (`bof4_reverb.c`), loop engine (`loops.c`, `loops_table.h`), 60 fps interpolation (`fps60.c`; built with `/DFPS_TEST` it is an offline tester for frame captures), sprite depth scaling (`sprites.c`) and widescreen (`widescreen.c`) |
 | `loops\` | analysis that derives loop points from the PS1 sequences and the PC recordings |
 | `lzhuf.py` | codec for the PC DAT files' compressed chunks |

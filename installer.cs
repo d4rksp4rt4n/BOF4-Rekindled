@@ -92,18 +92,34 @@ class Installer : Form
         return r;
     }
     public const string Version = "1.3";           // release tag on GitHub: "1.3" or "1.3.0"
-    const string Repo = "d4rksp4rt4n/BOF4-Rekindled";
+    const string Repo = "d4rksp4rt4n/bof4-rekindled";
     readonly LinkLabel update = new LinkLabel { Visible = false, AutoSize = true };
     const string BackupDir = "BOF4_Rekindled_backup";
-    // Steam: BOF4.exe is the GOG exe inside an Enigma wrapper (encrypted on disk), so it stays untouched and
-    // dsound.dll applies the exe patch in memory (from BOF4_Rekindled.mem). The other files equal GOG's.
-    // version.dll was the loader of an earlier test build; Apply and Restore remove it.
+    // BOF4.exe stays untouched (GOG and Steam): dsound.dll applies the exe options in memory, from
+    // BOF4_Rekindled.mem, the ones listed in BOF4_Rekindled.ini. Steam's BOF4.exe is the GOG exe inside an Enigma
+    // wrapper (encrypted on disk); its other files equal GOG's. Earlier versions patched the GOG exe itself: Apply
+    // and Restore put the backed-up original back. version.dll was the loader of an earlier test build; they remove it.
     const string SteamExe = "86f401f951e05458c36de3a1fb90af833a31ed6c947c378600f1a3869cdbef6e";
-    static readonly string[] SteamOnly = { "dsound.dll", "BOF4_Rekindled.mem" };
+    const string Ini = "BOF4_Rekindled.ini";
+    string gogExe = "";                                   // manifest "E" line: the untouched GOG exe, the exe options
+    readonly HashSet<string> exeOpts = new HashSet<string>();
     static bool IsSteam(string game) { return Sha(File.ReadAllBytes(Path.Combine(game, "BOF4.exe"))) == SteamExe; }
-    IEnumerable<IGrouping<string, Variant>> Files(bool steam)
+    IEnumerable<IGrouping<string, Variant>> Files() { return variants.GroupBy(v => v.Path); }
+    static string IniText(IEnumerable<string> opts) { return "[loader]\r\noptions=" + string.Join(",", opts) + "\r\n"; }
+    static List<string> IniOptions(string game)
     {
-        return variants.GroupBy(v => v.Path).Where(g => steam ? g.Key != "BOF4.exe" : !SteamOnly.Contains(g.Key));
+        string p = Path.Combine(game, Ini);
+        if (!File.Exists(p)) return new List<string>();
+        var l = File.ReadAllLines(p).FirstOrDefault(s => s.Trim().StartsWith("options="));
+        return l == null ? new List<string>() : l.Trim().Substring(8).Split(',').Where(s => s.Length > 0).ToList();
+    }
+    // 0: untouched GOG or Steam exe; 1: GOG exe patched by an earlier version (original in the backup); -1: unknown
+    int ExeState(string game, bool steam)
+    {
+        if (steam) return 0;
+        if (Sha(File.ReadAllBytes(Path.Combine(game, "BOF4.exe"))) == gogExe) return 0;
+        string bak = Path.Combine(game, BackupDir, "BOF4.exe");
+        return File.Exists(bak) && Sha(File.ReadAllBytes(bak)) == gogExe ? 1 : -1;
     }
     static readonly string Empty = Sha(new byte[0]);
 
@@ -203,7 +219,7 @@ class Installer : Form
     }
 
     static readonly string[][] Credits = {
-        new[] { "Project page, updates, issues", "github.com/d4rksp4rt4n/BOF4-Rekindled", "https://github.com/d4rksp4rt4n/BOF4-Rekindled" },
+        new[] { "Project page, updates, issues", "github.com/d4rksp4rt4n/bof4-rekindled", "https://github.com/d4rksp4rt4n/bof4-rekindled" },
         new[] { "Restored scene scripts, text", "navarchos - Breath of Fire IV Uncensored (PS1)", "https://www.romhacking.net/hacks/7192/" },
         new[] { "Better Descriptions", "Naro", "https://www.romhacking.net/hacks/9575/" },
         new[] { "Dengeki Store graphics", "Japanese GOG release of Breath of Fire IV (Capcom)", null },
@@ -293,6 +309,11 @@ class Installer : Form
             while ((l = r.ReadLine()) != null)
             {
                 if (l.StartsWith("O ")) options.Add(l.Substring(2).Split('|'));
+                else if (l.StartsWith("E "))
+                {
+                    var p = l.Split(' ');
+                    gogExe = p[1]; exeOpts.UnionWith(p.Skip(2));
+                }
                 else if (l.StartsWith("F "))
                 {
                     var p = l.Split(' ');
@@ -334,7 +355,7 @@ class Installer : Form
         MoveOldBackup(game);
         var installed = new HashSet<string>(); var known = new HashSet<string>();
         bool any = false, older = false, steam = IsSteam(game);
-        foreach (var g in Files(steam))
+        foreach (var g in Files())
         {
             string p = Path.Combine(game, g.Key);
             string h;
@@ -352,6 +373,12 @@ class Installer : Form
             else if (File.Exists(p) && (g.First().Src == Empty || File.Exists(Path.Combine(game, BackupDir, g.Key))))
                 older = true;                                 // ours, from another version (else: Run refuses it)
         }
+        if (ExeState(game, steam) == 1) older = true;         // exe patched by an earlier version: its options unknown
+        else
+        {
+            known.UnionWith(exeOpts);                         // exe options: the loader's list (none without it)
+            if (installed.Contains("loader")) installed.UnionWith(IniOptions(game).Where(exeOpts.Contains));
+        }
         if (any || older)
         {
             Defaults();
@@ -364,8 +391,7 @@ class Installer : Form
             }
         }
         log.Clear();
-        if (steam) Log("Steam version found (experimental): BOF4.exe stays untouched; dsound.dll applies its changes " +
-                       "in memory at start and writes BOF4_Rekindled.log.");
+        if (steam) Log("Steam version found (experimental).");
         if (older) Log("Found an install of another version of this mod. Options that can't be read from its files show " +
                        "the defaults; Apply rebuilds those files from the backed-up originals.");
         else Log(any ? "Found an earlier install of this mod; the options switched on are the ones installed."
@@ -385,9 +411,16 @@ class Installer : Form
             MoveOldBackup(game);
             var plan = new List<Tuple<string, byte[], Variant>>();   // path, original bytes, target (null = original)
             bool steam = IsSteam(game);
-            var exeParts = new HashSet<string>(variants.Where(v => v.Path == "BOF4.exe").SelectMany(v => v.Key.Split(',')));
-            if (steam && chosen.Any(exeParts.Contains)) chosen.Add("loader");
-            foreach (var g in Files(steam))
+            int exeState = ExeState(game, steam);
+            if (exeState < 0)
+                throw new Exception("BOF4.exe is not the GOG or Steam build this mod supports (changed by something else?). " +
+                                    "Reinstall the game files (GOG Galaxy: Verify / Repair), then run this again." +
+                                    Environment.NewLine + "Nothing was changed.");
+            var exeChosen = chosen.Where(exeOpts.Contains).ToList();
+            if (exeChosen.Count > 0) chosen.Add("loader");
+            string iniPath = Path.Combine(game, Ini), iniWant = exeChosen.Count > 0 ? IniText(exeChosen) : null;
+            bool iniChange = iniWant != (File.Exists(iniPath) ? File.ReadAllText(iniPath) : null);
+            foreach (var g in Files())
             {
                 string p = Path.Combine(game, g.Key), bak = Path.Combine(game, BackupDir, g.Key);
                 string orig = g.First().Src;
@@ -419,7 +452,13 @@ class Installer : Form
             if (dropOld) { File.Delete(oldLoader); Log("removed   version.dll (old loader)"); }
             foreach (var f in new[] { "BOF4_Uncut_EN.mem", "BOF4_Uncut_EN.log" })   // names before the rename
                 if (File.Exists(Path.Combine(game, f))) { File.Delete(Path.Combine(game, f)); Log("removed   " + f + " (old name)"); dropOld = true; }
-            if (plan.Count == 0 && !dropOld) { Log("Nothing to change - the game already has exactly these options."); return; }
+            if (plan.Count == 0 && !dropOld && !iniChange && exeState == 0)
+            { Log("Nothing to change - the game already has exactly these options."); return; }
+            if (exeState == 1)
+            {
+                File.Copy(Path.Combine(game, BackupDir, "BOF4.exe"), Path.Combine(game, "BOF4.exe"), true);
+                Log("restored  BOF4.exe (an earlier version patched it; now dsound.dll applies the changes in memory)");
+            }
             foreach (var t in plan)
             {
                 string p = Path.Combine(game, t.Item1), bak = Path.Combine(game, BackupDir, t.Item1);
@@ -428,6 +467,11 @@ class Installer : Form
                 if (data.Length == 0) File.Delete(p);             // restoring "no file"
                 else File.WriteAllBytes(p, data);
                 Log((t.Item3 == null ? "restored  " : "patched   ") + t.Item1);
+            }
+            if (iniChange)
+            {
+                if (iniWant == null) File.Delete(iniPath); else File.WriteAllText(iniPath, iniWant);
+                Log(iniWant == null ? "removed   " + Ini : "options   " + Ini + ": " + string.Join(", ", exeChosen));
             }
             Log(""); Log(chosen.Count == 0 ? "Done - original files restored." : "Done. Originals are kept in " + BackupDir + ".");
         }

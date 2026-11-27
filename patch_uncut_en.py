@@ -276,25 +276,29 @@ DEVICE = 0xABC200                  # IDirect3DDevice7*
 # saving writes them). Flag n = bit (n & 7) of byte 0xB5672C + (n >> 3).
 DENGEKI_FLAGS = [(0xB5672C + (n >> 3), 1 << (n & 7)) for n in (0x8D, 0xA5)]
 
+CLEAR_FEAT = CLEAR + 1              # feature byte: bit 0 stutter fix, bit 1 Dengeki Store (the same code for any choice)
+
 def clear_code(stutter=True, dengeki=True):
     flag = CLEAR
-    c = bytearray(16)                               # [flag][pad]
+    c = bytearray(16)                               # [flag][features][pad]
+    c[1] = (1 if stutter else 0) | (2 if dengeki else 0)
     set_flag = CLEAR + len(c)
     c += b"\xc6\x05" + struct.pack("<I", flag) + b"\x01\xc3"           # mov byte [flag],1 ; ret
     while len(c) % 16: c.append(0xCC)
     begin = CLEAR + len(c)
-    if dengeki:
-        for byte, bit in DENGEKI_FLAGS:                                   # hold the Dengeki Store flags
-            c += b"\x80\x0d" + struct.pack("<I", byte) + bytes([bit])     # or byte [flag byte], bit
+    c += b"\xf6\x05" + struct.pack("<I", CLEAR_FEAT) + b"\x02"            # test byte [features], 2
+    j = len(c); c += b"\x74\x00"                                          # jz: no Dengeki Store
+    for byte, bit in DENGEKI_FLAGS:                                       # hold the Dengeki Store flags
+        c += b"\x80\x0d" + struct.pack("<I", byte) + bytes([bit])         # or byte [flag byte], bit
+    c[j + 1] = len(c) - (j + 2)
     c += BEGIN_ORIG                                                       # BeginScene(device), as before
-    if stutter:
-        c += b"\x80\x3d" + struct.pack("<I", flag) + b"\x00"              # cmp byte [flag],0
-        j = len(c); c += b"\x74\x00"                                      # je done
-        c += b"\xc6\x05" + struct.pack("<I", flag) + b"\x00"              # mov byte [flag],0
-        c += b"\xa1" + struct.pack("<I", DEVICE)                          # mov eax,[device]
-        c += b"\x6a\x00\x68\x00\x00\x80\x3f\x6a\x00\x6a\x01\x6a\x00\x6a\x00"  # stencil 0, z 1.0, black, TARGET, NULL, 0
-        c += b"\x50\x8b\x10\xff\x52\x28"                                  # push eax; mov edx,[eax]; call [edx+0x28] (Clear)
-        c[j + 1] = len(c) - (j + 2)
+    c += b"\x80\x3d" + struct.pack("<I", flag) + b"\x00"                  # cmp byte [flag],0 (only set with the stutter fix)
+    j = len(c); c += b"\x74\x00"                                          # je done
+    c += b"\xc6\x05" + struct.pack("<I", flag) + b"\x00"                  # mov byte [flag],0
+    c += b"\xa1" + struct.pack("<I", DEVICE)                              # mov eax,[device]
+    c += b"\x6a\x00\x68\x00\x00\x80\x3f\x6a\x00\x6a\x01\x6a\x00\x6a\x00"  # stencil 0, z 1.0, black, TARGET, NULL, 0
+    c += b"\x50\x8b\x10\xff\x52\x28"                                      # push eax; mov edx,[eax]; call [edx+0x28] (Clear)
+    c[j + 1] = len(c) - (j + 2)
     c += b"\xc3"                                                          # done: ret
     return bytes(c), set_flag, begin
 
