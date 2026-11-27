@@ -8,6 +8,8 @@ import config
 import patch_uncut_en as P
 import button_icons, identify_icons
 from steam.mem_list import mem_list
+import sys; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loops"))
+import boss_victory                                            # loops/: renders from the PS1 disc (config.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME = os.path.dirname(HERE)
@@ -24,10 +26,13 @@ OPTIONS = [  # group, id, label, description, on/off by default[, choices "id=la
     (CONTENT, "desc", "Better Descriptions (by Naro)",
      "Item, equipment and master descriptions also list hidden effects and resistances.", "on"),
     (FIXES, "fixes", "PC port fixes",
-     "Fixes random stutters (the screen was read back from the GPU every frame) and the swimming 3D in rooms "
-     "with lighting effects, such as North Chamba.", "on"),
+     "Fixes random stutters (the screen was read back from the GPU every frame), the swimming 3D in rooms "
+     "with lighting effects, such as North Chamba, and darkening effects drawn black over their solid parts "
+     "(Fou-Lu's sword swipe, white on the PS1).", "on"),
     (FIXES, "loops", "Correct music loops",
-     "Songs loop from their real loop point instead of restarting the intro, without the click at each restart.", "on"),
+     "Songs loop from their real loop point instead of restarting the intro, without the click at each restart. "
+     "Also brings back the PS1's boss versions of the victory theme (Ryu's and Fou-Lu's boss battles), rebuilt "
+     "from the PS1 music data.", "on"),
     (FIXES, "reverb", "PlayStation reverb",
      "Adds back the reverb the PS1's sound chip put on the music. The PC recordings are dry. Strength adjustable "
      "in BOF4_reverb.ini.", "on"),
@@ -48,11 +53,12 @@ OPTIONS = [  # group, id, label, description, on/off by default[, choices "id=la
      "screen, and in the controller's button hints (A green, B red...).", "off", "=Numbers (original)", "xbox=Xbox", "ps=PlayStation"),
 ]
 # Installer options that stand for several patch_exe parts; the others are one part of the same name.
-PARTS = {"content": ("uncut", "dengeki", "identify"), "fixes": ("stutter", "wobble")}
+PARTS = {"content": ("uncut", "dengeki", "identify"), "fixes": ("stutter", "wobble", "blend")}
+ALWAYS = ("ffwd",)          # exe parts in every patched exe (fast-forward: Home, works whenever bof4_reverb.dll is there)
 # Option ids as variant keys use them, in manifest order (a dropdown contributes its choices).
 IDS = [c.split("=")[0] for o in OPTIONS for c in (o[5:] or [o[1]]) if c[0] != "="]
 EXE_OPTS = [i for i in IDS if set(PARTS.get(i, (i,))) <= set(P.EXE_PARTS)]
-assert sorted(p for i in EXE_OPTS for p in PARTS.get(i, (i,))) == sorted(P.EXE_PARTS)
+assert sorted([p for i in EXE_OPTS for p in PARTS.get(i, (i,))] + list(ALWAYS)) == sorted(P.EXE_PARTS)
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
 # Naro's PC release (Nexus): one BPS patch per DAT file, against the English GOG files.
@@ -92,11 +98,17 @@ def build_variants():
     exe = open(config.CLEAN_EXE, "rb").read()
     for n in range(1, len(EXE_OPTS) + 1):
         for key in itertools.combinations(EXE_OPTS, n):
-            patched = P.patch_exe(exe, [p for i in key for p in PARTS.get(i, (i,))])
+            patched = P.patch_exe(exe, [p for i in key for p in PARTS.get(i, (i,))] + list(ALWAYS))
             yield ("BOF4.exe", key, exe, patched)
             # Steam: the same patch, applied in memory by the loader (steam\dsound.dll)
             yield ("BOF4_Rekindled.mem", key, b"", mem_list(exe, patched).encode())
     yield ("dsound.dll", ("loader",), b"", open(os.path.join(HERE, "steam", "dsound.dll"), "rb").read())
+    # boss victory themes: song 1 of the two boss music files, rendered from the PS1 disc (loops/boss_victory.py)
+    table = open(os.path.join(HERE, "reverb", "loops_table.h")).read()
+    for name, mp3 in boss_victory.mp3s().items():
+        assert f"{{{len(mp3)}, 0x{zlib.crc32(mp3[:4096]):08X}u," in table, \
+            f"{name}: rendered song not in reverb/loops_table.h - run loops/make_table.py and reverb/build.bat"
+        yield ("DAT\\" + name + ".DAT", ("loops",), en(name + ".DAT"), P.patch_bgm(en(name + ".DAT"), 1, mp3))
     # DAT files of "content" (scenes, store, Identify) are disjoint, so each has the one key
     assert not (set(P.LINES) & set(P.STORE) or set(P.LINES) & set(P.IDENTIFY_DATS) or set(P.STORE) & set(P.IDENTIFY_DATS))
     for f, msgs in P.LINES.items():
@@ -137,6 +149,13 @@ def ops(src, dst):
             j, same = i, src[i] == dst[i]
             while j < len(dst) and (src[j] == dst[j]) == same: j += 1
             out.append(("C", i, j - i) if same else ("L", dst[i:j])); i = j
+        return out
+    if dst[:4] == b"\x10\0\0\0" and dst[0x10] in (0x30, 0x31):   # music file: header literal, songs copied if unchanged
+        ents = P.bgm_parts(dst); start = 0x10 + 16 * len(ents)
+        out = [("L", dst[:start])]
+        for flag, tag, off, size in ents:
+            c = dst[0x10 + off:0x10 + off + size]; k = src.find(c)
+            out.append(("C", k, size) if k >= 0 else ("L", c))
         return out
     ents = P.table(dst)                                    # DAT container: per chunk
     out = [("L", dst[:ents[0][0]])]

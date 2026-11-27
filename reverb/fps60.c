@@ -22,6 +22,7 @@
  * != 2, a camera cut, projection/scale changes, or when too few primitives match.
  * Scroll Lock switches the in-between frames off/on. BOF4_reverb.ini [fps60]: log=1 (BOF4_fps60.log),
  * dump=1 (Pause writes the last 32 frames to fps60_dump\ for fps60_test).
+ * The present hook also serves the fast-forward option (Home: 1x-4x, see ff_poll), with or without 60 fps.
  *
  * FPS_TEST builds an offline tester that replays those dumps (or bof4_diag's): .psxseg + .data snapshots. */
 #include <windows.h>
@@ -594,6 +595,34 @@ static int fps_mid(const Frame *P, const Frame *N, Vtx *out, float t, Stats *s) 
  * exactly n vblanks (QueryPerformanceCounter) and the in-between frame goes out halfway. */
 #define VBLANK_MS (1000.0 / 60)
 #define MS_TABLE  0x952998
+#define DEADLINE  0xB40984     /* the limiter's next frame time (GetTickCount), advanced by n x table each frame */
+#define DIK_STATE 0xABC284     /* the game's DirectInput keyboard state */
+#define DIK_HOME  0xC7         /* not numpad 7 (0x47, a diagonal), which reads as VK_HOME with Num Lock off */
+#define DEVICE    0xABC200     /* IDirect3DDevice7* */
+#define CLR_COLOR 0xABC204
+#define CLR_TARGET 0xBBFB18    /* PRESENT also clears the render target when set */
+
+/* Fast-forward (option "ffwd", feature bit 2): Home cycles 1x, 2x, 3x, 4x. The limiter's ms table is divided by the
+ * speed, so game logic, animation and timers run that much faster; music streams by its own clock and plays on
+ * normally. Presents wait for the vertical blank, so only every speed-th frame is presented (the others are drawn,
+ * and Z is cleared as PRESENT would); no in-between frames meanwhile. The window title shows the speed. */
+static int g_speed = 1, g_ff_key, g_ff_n;
+static u32 g_ms_orig[4];
+void bof4_title(int slot, const char *text);                /* sprites.c */
+
+static void ff_poll(void) {
+    int key = MEM(u8, DIK_STATE + DIK_HOME) & 0x80, i;
+    char t[40];
+    if (key && !g_ff_key) {
+        g_speed = g_speed % 4 + 1;
+        for (i = 0; i < 4; i++)
+            MEM(u32, MS_TABLE + 4 * i) = g_speed > 1 ? (g_ms_orig[i] + g_speed / 2) / g_speed : MEM(u8, FEATURES) & 1 ? 16 : g_ms_orig[i];
+        MEM(u32, DEADLINE) = GetTickCount();                /* no catching up with the old schedule, or racing ahead */
+        wsprintfA(t, "speed %dx", g_speed);
+        bof4_title(1, g_speed > 1 ? t : "");
+    }
+    g_ff_key = key;
+}
 
 static Frame g_fr[2]; static int g_cur;
 static Vtx *g_mid; static int g_cap_mid;
@@ -646,6 +675,7 @@ static void init(void) {
     char ini[MAX_PATH], *p; int i;
     if (g_qf.QuadPart) return;
     QueryPerformanceFrequency(&g_qf); g_t_log = now_ms();
+    for (i = 0; i < 4; i++) g_ms_orig[i] = MEM(u32, MS_TABLE + 4 * i);
     if (MEM(u8, FEATURES) & 1) for (i = 0; i < 4; i++) MEM(u32, MS_TABLE + 4 * i) = 16;
     GetModuleFileNameA(NULL, ini, MAX_PATH);
     if ((p = strrchr(ini, '\\')) != 0) {
@@ -676,6 +706,18 @@ static void log_stats(void) {
 __declspec(dllexport) int __cdecl bof4_fps_present(int a) {
     u32 n; double t;
     init();
+    if (MEM(u8, FEATURES) & 4) ff_poll();
+    if (g_speed > 1) {                                  /* the limiter paces; present every speed-th frame */
+        g_sched = 0;                                    /* 60 fps pacing restarts at 1x */
+        if (++g_ff_n % g_speed == 0) return ((int(__cdecl *)(int))PRESENT)(a);
+        {
+            void *dev = MEM(void *, DEVICE);
+            if (dev) (*(HRESULT (__stdcall **)(void *, DWORD, void *, DWORD, DWORD, float, DWORD))(*(u8 **)dev + 0x28))
+                (dev, 0, NULL, 2 | (MEM(u8, CLR_TARGET) && !a), MEM(u32, CLR_COLOR), 1.0f, 0);   /* Clear: Z (+ target) */
+        }
+        return 0;
+    }
+    if (!(MEM(u8, FEATURES) & 1)) return ((int(__cdecl *)(int))PRESENT)(a);   /* fast-forward only, at 1x */
     n = MEM(u32, VSYNC_N);
     if (n < 1) n = 1; if (n > 8) n = 8;
     g_frame = n * VBLANK_MS;
@@ -697,7 +739,7 @@ static void exec(void *surf, void *rect, int flag) {
 __declspec(dllexport) void __cdecl bof4_fps_screen(void *surf, void *rect, int flag) {
     Frame *N = &g_fr[g_cur], *P = &g_fr[g_cur ^ 1];
     int key = GetAsyncKeyState(VK_SCROLL) & 0x8000;          /* Scroll Lock: in-between frames off/on */
-    if (!(MEM(u8, FEATURES) & 1)) { exec(surf, rect, flag); return; }
+    if (!(MEM(u8, FEATURES) & 1) || g_speed > 1) { exec(surf, rect, flag); return; }
     init();
     if (key && !g_key_prev) g_on ^= 1;
     g_key_prev = key;

@@ -36,7 +36,19 @@ static float g_ref = 5120.0f;
 enum { SHRINK, FULL, OFF };
 static const char *g_mode_name[] = {"shrink only", "full", "off"};
 static float g_strength = -1; static int g_mode, g_key;
-static char g_title[200];
+
+/* The window title: the game's, then each hotkey's state (slot 0 sprite scaling, 1 fast-forward; "" = not shown). */
+static char g_title[200], g_part[2][60];
+void bof4_title(int slot, const char *text) {
+    char t[400]; int i; HWND w = GetForegroundWindow(); DWORD pid = 0;
+    if (w) GetWindowThreadProcessId(w, &pid);
+    if (!w || pid != GetCurrentProcessId()) return;
+    if (!g_title[0]) GetWindowTextA(w, g_title, sizeof g_title);
+    lstrcpynA(g_part[slot], text, sizeof g_part[slot]);
+    lstrcpyA(t, g_title);
+    for (i = 0; i < 2; i++) if (g_part[i][0]) { lstrcatA(t, " - "); lstrcatA(t, g_part[i]); }
+    SetWindowTextA(w, t);
+}
 
 static void init(void) {
     char ini[MAX_PATH], *p;
@@ -49,13 +61,12 @@ static void init(void) {
 }
 
 static void hotkey(void) {
-    char t[300]; HWND w;
+    char t[60];
     int key = GetAsyncKeyState(VK_INSERT) & 0x8000;
-    if (key && !g_key && (w = GetForegroundWindow()) != 0) {
+    if (key && !g_key && GetForegroundWindow()) {
         g_mode = (g_mode + 1) % 3;
-        if (!g_title[0]) GetWindowTextA(w, g_title, sizeof g_title);
-        wsprintfA(t, "%s - sprite depth scaling: %s", g_title, g_mode_name[g_mode]);
-        SetWindowTextA(w, t);
+        wsprintfA(t, "sprite depth scaling: %s", g_mode_name[g_mode]);
+        bof4_title(0, t);
     }
     g_key = key;
 }

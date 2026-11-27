@@ -24,18 +24,28 @@ Fixes
     * wobble: in rooms with lighting effects (North Chamba and a few others) the PC port
       snapped the 3D to whole PS1 pixels, so walls and floors swam like on a PlayStation. This
       keeps the exact positions.
+    * darkening effects: the PS1 subtracts only the see-through parts of a darkening effect's
+      picture; the port subtracted all of it, so Fou-Lu's sword swipe (white on the PS1) was black.
   - Correct music loops: the PC version restarts every song from the beginning, so intros
     replay on each loop. With this, songs loop from their real loop point (taken from the PS1
     version and checked against the PC recordings) for most music. Every looping track also
     loses the click and short dropout the PC version has at each restart (its MP3 player plays
     a garbled last frame and silent padding). Some PC recordings stop before the song's loop
     end; those still restart from the beginning, but without the click.
+    Also brings back the boss victory themes: on the PS1, the victory theme after the boss
+    battles of Ryu's and Fou-Lu's parties plays with the boss music's instruments. The PC only
+    has the normal recordings; these are rebuilt from the PS1 music data.
   - PlayStation reverb: the PC music is plain MP3 recordings without the reverb the PS1 sound
     chip adds. This adds it back while the game plays (bof4_reverb.dll), using the PS1 game's own
     setting ("Studio Medium", depth 64 of 127). To make it stronger or weaker, create
     BOF4_reverb.ini next to BOF4.exe:
         [reverb]
         wet=100        ; percent of the PS1 level (0 = off)
+
+Always on
+  - Fast-forward: Home switches the game speed between 1x, 2x, 3x and 4x while playing
+    (shown in the window title). Music plays on at normal speed. Needs bof4_reverb.dll, which
+    any of Correct music loops, PlayStation reverb or the enhancements installs.
 
 Enhancements (experimental, off by default)
   - 60 fps: the game runs at 30 fps. This draws an in-between
@@ -61,6 +71,7 @@ Enhancements (experimental, off by default)
         [sprites]
         strength=100   ; % of the full perspective size change
         grow=1         ; characters closer to the camera get bigger too (default 0)
+
 
 Controller (experimental, off by default)
   - Start/Back as Start/Select: a controller's Start and Back

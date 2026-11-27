@@ -149,6 +149,26 @@ def patch_text(d, msgs):
         assert bytes(t[o:o + len(msg)]) == msg
     return new
 
+# Music files (BGMnnn.DAT): [0x10][size - 0x10][4][1], then per song (flag 0x30/0x31, tag, offset from 0x10, size),
+# the MP3s back to back after the entries.
+def bgm_parts(d):
+    out, i = [], 0x10
+    while d[i] in (0x30, 0x31):
+        flag, tag, off, size = struct.unpack_from("<4I", d, i); out.append([flag, tag, off, size]); i += 16
+    return out
+
+def patch_bgm(d, part, mp3):
+    """d with song `part` replaced by mp3"""
+    ents = bgm_parts(d); data = [d[0x10 + e[2]:0x10 + e[2] + e[3]] for e in ents]
+    data[part] = mp3
+    off = 16 * len(ents); out = bytearray(d[:0x10])
+    for e, m in zip(ents, data):
+        out += struct.pack("<4I", e[0], e[1], off, len(m)); off += len(m)
+    out += b"".join(data)
+    struct.pack_into("<I", out, 4, len(out) - 0x10)
+    assert bgm_parts(out)[part][3] == len(mp3) and out.endswith(data[-1])
+    return bytes(out)
+
 # ---------------------------------------------------------------- BOF4.exe
 TEXT_VA, TEXT_RAW = 0x401000, 0x1200
 def fo(va): return va - TEXT_VA + TEXT_RAW
@@ -398,10 +418,10 @@ FPS = 0x6A7D00                     # [loaded][features][pad2][fn_screen][fn_pres
 SCREEN_SITE, EXEC = 0x40AC03, 0x40A8A0
 PRESENT_SITE, PRESENT = 0x410A47, 0x4028D0
 
-def fps_code(fps60=True, wide=False):
-    """features (read by the DLL): bit 0 = in-between frames and pacing, bit 1 = widescreen."""
+def fps_code(fps60=True, wide=False, ffwd=False):
+    """features (read by the DLL): bit 0 = in-between frames and pacing, bit 1 = widescreen, bit 2 = fast-forward."""
     loaded, f_screen, f_present = FPS, FPS + 4, FPS + 8
-    c = bytearray(16); c[1] = (1 if fps60 else 0) | (2 if wide else 0)
+    c = bytearray(16); c[1] = (1 if fps60 else 0) | (2 if wide else 0) | (4 if ffwd else 0)
     a32 = lambda v: struct.pack("<I", v)
     here = lambda: FPS + len(c)
     fix, labels = [], {}
@@ -703,8 +723,9 @@ LABEL_BASE = {"small": 91, "big": 104}   # first label glyph in each keycap font
 LABEL_DOUBLE = sum(1 << b for b in (5, 6, 9, 10))   # buttons with a 2-slot label (button_icons.DOUBLE)
 
 def asm(base, prog, labels):
-    """Tiny assembler: bytes, str = label, ("j8"/"j32"/"call", opcode, label or address). Fills labels."""
-    size = lambda p: 0 if isinstance(p, str) else len(p) if isinstance(p, bytes) else 2 if p[0] == "j8" else 5
+    """Tiny assembler: bytes, str = label, ("j8"/"j32"/"call"/"jcc", opcode, label or address). Fills labels.
+    jcc: 0F opcode rel32."""
+    size = lambda p: 0 if isinstance(p, str) else len(p) if isinstance(p, bytes) else 2 if p[0] == "j8" else 6 if p[0] == "jcc" else 5
     at = base
     for p in prog:
         if isinstance(p, str): labels[p] = at
@@ -715,6 +736,7 @@ def asm(base, prog, labels):
         elif isinstance(p, tuple):
             kind, op, t = p; t = labels.get(t, t); nxt = base + len(c) + size(p)
             if kind == "j8": assert -128 <= t - nxt < 128; c += bytes([op, (t - nxt) & 0xFF])
+            elif kind == "jcc": c += bytes([0x0F, op]) + rel(nxt, t)
             else: c += bytes([op]) + rel(nxt, t)
     return bytes(c)
 
@@ -756,8 +778,37 @@ def pad_code():
     labels = {}
     return asm(PAD, prog, labels), labels
 
+# PS1 subtractive blending (Fou-Lu's black sword swipe): on the PS1, semi-transparency only applies to texels with
+# the STP bit; the others are drawn opaque. The port draws such a primitive twice (0x403620): first the opaque texels
+# (texture B, alpha blend), then all of them (texture A) with the blend. For subtraction (mode 2) that second pass
+# would subtract the opaque texels too, so the port draws mode 2 in one pass over everything: opaque white texels
+# come out black. Here mode 2 is split too, in the other order: subtract with A first (the first entry, flagged 0x800,
+# semi bit cleared), then B's opaque texels over it with alpha blending (the second entry, no semi bit, vertex alpha
+# 0xFF). 0x403710 (blend state per entry) sends a 0x800 entry of mode 2 to the normal subtract state. The immediate
+# draw path (0x40A5F0, drawing into VRAM) stays one pass.
+BLEND = 0x6A79F0                   # after the script redirects, before the clear stub
+SPLIT_TABLE = 0x403700             # 0x403620's jump table by blend mode: [2] = 0x4036FA (return: no split)
+SPLIT_COMMON = 0x4036B6            # the split: entry 1 gets texture [+0xC] and 0x800, entry 2 texture [+4]
+BLEND_SITE = 0x40371D              # test ch, 8; je 0x403765 (0x800: first-pass blend state)
+CMD_PTR, VTX_PTR = 0x96DA7C, 0x96DA70
+
+def blend_code():
+    """Returns (code at BLEND, entry points)."""
+    a32 = lambda v: struct.pack("<I", v)
+    prog = ["split",
+            b"\xa1" + a32(CMD_PTR) + H("8020fd"),           # mov eax, [cmd]; and byte [eax], ~2 (both entries: no semi bit)
+            H("8b4804" "87480c" "894804"),                  # swap [+4] (A) and [+0xC] (B): the split puts A first
+            b"\x8b\x35" + a32(VTX_PTR) + H("01de" "89d1"),  # esi = second copy of the vertices (ebx = size), ecx = count
+            "alpha", H("804e13ff" "83c620" "49"), ("j8", 0x75, "alpha"),   # its vertex alpha 0xFF
+            ("j32", 0xE9, SPLIT_COMMON),
+            "state", H("f6c508"), ("jcc", 0x84, 0x403765),  # test ch, 8; je: no 0x800 (as before)
+            H("3c02"), ("jcc", 0x85, 0x403722),             # cmp al, 2; jne: other modes' first pass (as before)
+            ("j32", 0xE9, 0x40376E)]                        # mode 2: the single-pass state switch (eax = 2)
+    labels = {}
+    return asm(BLEND, prog, labels), labels
+
 EXE_PARTS = ("uncut", "dengeki", "stutter", "reverb", "loops", "identify", "fps60", "wobble", "sprites", "widescreen",
-             "startback")
+             "startback", "blend", "ffwd")
 
 def patch_exe(d, parts=EXE_PARTS):
     d = bytearray(d)
@@ -796,18 +847,29 @@ def patch_exe(d, parts=EXE_PARTS):
     if "stutter" in parts:
         d[fo(FILL_SITE):fo(FILL_SITE) + 5] = b"\xe8" + rel(FILL_SITE + 5, set_flag)
         make_text_writable(d)                              # its flag byte lives in the cave
-    fc, f_screen, f_present = fps_code("fps60" in parts, "widescreen" in parts)
+    fc, f_screen, f_present = fps_code("fps60" in parts, "widescreen" in parts, "ffwd" in parts)
     assert FPS >= MUSIC + len(mc) and FPS + len(fc) <= 0x6A8000
     assert d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] == b"\xe8" + rel(SCREEN_SITE + 5, EXEC), "unexpected code at screen pass"
     assert d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] == b"\xe8" + rel(PRESENT_SITE + 5, PRESENT), "unexpected code at present"
     culls = wide_culls(d)
-    if "fps60" in parts or "widescreen" in parts:         # both go through the screen pass hook
+    if {"fps60", "widescreen", "ffwd"} & set(parts):       # the DLL stub (its data says which of them are on)
         assert d[fo(FPS):fo(FPS) + len(fc)] == bytes(len(fc)), "fps60 cave not free"
         d[fo(FPS):fo(FPS) + len(fc)] = fc
-        d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] = b"\xe8" + rel(SCREEN_SITE + 5, f_screen)
         make_text_writable(d)                              # stub data lives in the cave
-    if "fps60" in parts:
+    if "fps60" in parts or "widescreen" in parts:         # both go through the screen pass hook
+        d[fo(SCREEN_SITE):fo(SCREEN_SITE) + 5] = b"\xe8" + rel(SCREEN_SITE + 5, f_screen)
+    if "fps60" in parts or "ffwd" in parts:               # both pace or skip presents
         d[fo(PRESENT_SITE):fo(PRESENT_SITE) + 5] = b"\xe8" + rel(PRESENT_SITE + 5, f_present)
+    bl, bll = blend_code()
+    assert BLEND >= REDIR + len(redirect_code()[0]) + 16 and BLEND + len(bl) + 16 <= CLEAR
+    table2 = SPLIT_TABLE + 8
+    assert d[fo(table2):fo(table2) + 4] == struct.pack("<I", 0x4036FA), "unexpected split jump table"
+    assert d[fo(BLEND_SITE):fo(BLEND_SITE) + 5] == H("f6c5087443"), f"unexpected code at {BLEND_SITE:#x}"
+    if "blend" in parts:
+        assert d[fo(BLEND):fo(BLEND) + len(bl)] == bytes(len(bl)), "blend cave not free"
+        d[fo(BLEND):fo(BLEND) + len(bl)] = bl
+        d[fo(table2):fo(table2) + 4] = struct.pack("<I", bll["split"])
+        d[fo(BLEND_SITE):fo(BLEND_SITE) + 5] = b"\xe9" + rel(BLEND_SITE + 5, bll["state"])
     wc, otz, span, movie, rect = window_code()
     assert WIDE_WINDOW >= SPR + len(spr_code()[0]) and WIDE_WINDOW + len(wc) <= 0x6A8000
     assert d[fo(SPAN_SITE):fo(SPAN_SITE) + len(SPAN_LOAD)] == SPAN_LOAD, f"unexpected code at {SPAN_SITE:#x}"

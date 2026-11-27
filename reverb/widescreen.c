@@ -404,6 +404,8 @@ void wide_exec(void *surf, int *rect, int flag) {
         for (d = 0; d < draws; d++, vi += n, c += 8) {           /* a second draw has its own entry and vertices */
             Prim *p = &g_p[np++];
             p->w = MEM(u32, c); p->tex = MEM(u32, c + 4); p->v0 = vi; p->n = n; p->flat = 1; p->pair = draws == 2; p->push = 0;
+            if (draws == 2 && (w >> 5 & 3) == 2) { p->w |= 2; p->pair = 0; }   /* option "blend": a subtractive effect's
+                                                    two passes, judged like the single semi-transparent draw it was */
             p->x0 = p->y0 = 1e30f; p->x1 = p->y1 = -1e30f;
             for (i = vi; i < vi + n; i++) {
                 if (v[i].x < p->x0) p->x0 = v[i].x; if (v[i].x > p->x1) p->x1 = v[i].x;

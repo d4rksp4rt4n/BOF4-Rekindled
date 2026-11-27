@@ -2,9 +2,6 @@
 
 *Formerly "Breath of Fire IV – English Uncut". Installs made with the old installer are picked up as they are.*
 
-> **This page describes the version in development.** Widescreen and the Controller options are not in
-> the current release (1.2) yet; they are still being tested.
-
 A patcher for the English GOG release of *Breath of Fire IV* that restores content cut from the Western
 release and fixes several problems of the PC port. It comes as a small Windows installer with a GUI. Every
 option can be switched on or off, and "Restore original files" undoes everything. 
@@ -16,12 +13,13 @@ are experimental and off by default.
 |---|---|---|
 | Restored content | Restore cut content | Everything the English release removed: the four cut scenes (Ryu and Ursula at the checkpoint, Ursula on Zig's ship, Emperor Soniel's attack on Fou-Lu, the Saldine Island bath scene) with English text; the Japan-only Dengeki Store, with its original English (US PlayStation) text and the graphics the English port dropped; and Scias' Identify ability at level 3, with element icons for the weakness/resistance list as in the PS1 hack |
 | | Better Descriptions (by Naro) | Naro's descriptions of hidden item, equipment and master effects and resistances |
-| Fixes | PC port fixes | Stutter: the per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches). Wobble: in rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has |
-| | Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart |
+| Fixes | PC port fixes | Stutter: the per-frame screen clear runs on the GPU instead of forcing a GPU readback in GOG's ddraw wrapper (random hitches). Wobble: in rooms with lighting effects (North Chamba and a few others) the PC port snaps the 3D to whole PS1 pixels, so walls and floors swim like on a PlayStation; this keeps the exact positions it already has. Darkening effects: the PS1 subtracts only the see-through parts of a darkening effect's picture and draws the solid parts as they are; the port subtracts everything, so Fou-Lu's sword swipe, white on the PS1, is black. This draws them like the PS1 |
+| | Correct music loops | Songs loop from their real loop point instead of replaying the intro, and without the click/gap the PC player makes at every restart. Also the boss victory themes: on the PS1 the victory theme after the boss battles of Ryu's and Fou-Lu's parties plays with the boss music's own instruments, a more triumphant version the PC never recorded; it is rebuilt from the PS1 music data |
 | | PlayStation reverb | The PC music is dry MP3 recordings; this adds the PS1 sound chip's reverb back at runtime, using the PS1 game's own setting |
 | Enhancements (experimental) | 60 fps | The game runs at 30 fps; this draws an in-between frame for each one (camera and characters move smoothly). Scroll Lock switches it off and on while playing |
 | | Widescreen | At a 16:9 resolution the game stretches its 4:3 picture to the full width. This keeps the proportions right and shows more of the 3D scene at the sides instead; menus, text and the HUD stay in the centred 4:3 area, and movies play in 4:3 with black bars. Choose the resolution in the game: Camp → Settings → Screen adjust |
 | | Sprite depth scaling | Characters are fixed-size sprites while the 3D around them shrinks with distance, so a villager up the street looks like it grows next to the floor under it. This shrinks characters further away than the player like the 3D around them (the player and everyone closer keep their size). Insert switches between shrink only, full perspective and off while playing |
+| Always on | Fast-forward | Home switches the game speed between 1x, 2x, 3x and 4x while playing (shown in the window title). Music plays on at normal speed. Needs `bof4_reverb.dll`, which comes with Correct music loops, PlayStation reverb, 60 fps, Widescreen or Sprite depth scaling |
 | Controller (experimental) | Start/Back as Start/Select | A controller's Start and Back (View/Select) buttons work as the PS1's Start and Select. The PC port leaves them on the stick clicks and its Key/Pad Setting screen can't move them. A new key setup also puts the camera on LB/RB and Change Rank on the right stick click. Button hints (the world map's Menu panel, battle's Menu and Enemy(s) labels, buttons named in help text) show keyboard keys even with a controller; with this their keycaps show the controller's button while you play with it (A, B, LB… in their colours, ✕ ○ □ △…, or numbers, as chosen under Button icons), and keys again once you press a key |
 | | Button icons | Numbers (original), Xbox or PlayStation. The game names controller buttons with circled numbers ①–⑩ on the Key/Pad Setting screen. Xbox and PlayStation show the button itself instead: A, B, X, Y, LB, RB, View, Menu, LS, RS, or ✕, ○, □, △, L1, R1, Select, Start, L3, R3 |
 
@@ -83,6 +81,8 @@ did, where you were in the game, and, if possible, a save file.
 | **Widescreen** | **Experimental.** Tested at 1920×1080 and 3840×2160 on the world map, in fields (camera turned all the way round), battles (battle swirl, targeting, Gigaflare, Blizzard, all summons, the dragon Breath attacks), the fishing minigame, the Sand Flier race, busy towns (Synesta), the plains, every map and field of the game (walked with random encounters off), shops, dungeons with 2D effects (the Shrine's lasers and lamps, the Tomb's ghost blocks, waterfall mist), menus and the intro movie, also together with 60 fps and sprite depth scaling. HUD at the screen edges: the fishing minigame's panels, the field compass, the world map's Menu panel and road box, battle's Enemy(s) box; other panels (menus, dialogue, the battle command menu and party status) keep their 4:3 positions. Known limits: the game's own draw distance shows more at the far corners (the Sand Flier race's distant walls and grass pop in at the sides too); some sprites still vanish at the 4:3 edge (the fish in Flood Tide). Report anything cut off at the sides, popping in near the edges, or stuck in the 4:3 area when it should cover the screen, with a screenshot |
 | **Controller Start/Back, button icons** | **New, experimental.** Icons checked in game on the Key/Pad Setting screen (both sets, normal and selected colours). Start/Back tested with an Xbox-order controller. Controller button hints tested with a real controller (Xbox set): the world map's Menu panels, battle's Menu and Enemy(s) labels and buttons named in help text, switching back to keys and forth to the pad. GOG's input wrapper reports pads in Xbox order, so other pads should show the right icons too; report a pad whose icons don't match its buttons |
 | PC port fixes (wobble), sprite depth scaling | **New.** Tested in North Chamba and Synesta. Known limit: the Tomb's translucent puzzle blocks still snap to whole pixels (their own renderer draws them in 2D and keeps no exact positions). Report rooms that still swim, or characters whose size looks wrong or jumps |
+| **PC port fixes (darkening effects), fast-forward** | **New.** Tested in game: Fou-Lu's sword swipe (white, as on the PS1) and fast-forward at every speed. Report an effect that looks different from the PS1 only with the option on, or anything that breaks at a higher speed |
+| **Music loops (boss victory themes)** | **New.** Rendered from the PS1 music data; checked against Dragnier's PS1 recordings by ear and against the PC recordings of the normal versions (same pitch, tone curve and balance fitted). Report a boss victory that sounds wrong or loops badly |
 | **Steam version** | **Experimental, not yet tested on a real Steam install.** Its `BOF4.exe` is the GOG exe inside an Enigma wrapper (encrypted on disk); every other file equals GOG's. The installer leaves the exe untouched and adds `dsound.dll`, which forwards sound to the system `dsound.dll` and, at the game's first DirectSound call (after it has unpacked), applies the same exe changes in memory and logs the result to `BOF4_Rekindled.log`. Apply and Restore remove the `version.dll` of an earlier test build. Reports from Steam owners (with that log) are very welcome |
 
 ## Building from source
@@ -100,6 +100,7 @@ Inputs (never committed; set the paths in `config.py` or with environment variab
 | `BOF4_CLEAN_EXE` | `backup\BOF4.exe` | an untouched GOG `BOF4.exe` |
 | `BOF4_CLEAN_DAT` | `<game>\DAT_backup` | untouched English GOG `DAT` files |
 | `BOF4_DESC_ZIP` | `<game>\Breath of Fire IV - Better Descriptions-*.zip` | Naro's PC release |
+| `BOF4_PS1_BGM` | `<game>\PS1\BIN\BGM` | the US PS1 disc's `BIN\BGM` folder: the boss victory themes are rendered from it (`loops\boss_victory.py`, once, into `build_tmp\boss_victory`; needs `ffmpeg`) |
 
 Build:
 ```bat
@@ -112,7 +113,7 @@ files, plus SHA-256 checks, for every combination of options.
 
 The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`) also needs `ffmpeg`
 (`FFMPEG`) and the extracted US PS1 disc (`BOF4_PS1_BGM`). Run it as `analyze.py`, then `measure.py`,
-`final.py` and `make_table.py`.
+`final.py` and `make_table.py`. `make_table.py` also adds the loop points of the rendered boss victory themes (`loops\boss_victory.json`); after re-rendering them, run it and `reverb\build.bat` again.
 
 `derive_scenes.py` (only needed to re-check the scene redirects) also needs the clean US PS1 disc image
 (`BOF4_PS1_US_BIN`, Track 1 `.bin`) and navarchos' Uncensored hack applied and extracted
@@ -192,6 +193,14 @@ The loop analysis in `loops\` (only needed to regenerate `reverb\loops_table.h`)
   and its sprite packets already carry a scale factor (always 1). The DLL records each anchor's view depth when
   the game projects it and, at draw time, scales the character by the player's depth over its own (only when
   that shrinks it, unless `grow=1`). The camera follows the player, so the player keeps its size.
+- **PC port fixes, darkening effects** (exe only): PS1 semi-transparency applies only to texels with the STP bit; the others are
+  drawn solid. The port copies that with two passes (solid texels first, then everything blended), except for
+  subtraction, where the second pass would subtract the solid texels too, so it subtracts the whole picture in one pass.
+  The patch splits subtraction too, in the other order: subtract everything, then draw the solid texels over it.
+- **Boss victory themes** (Correct music loops; `loops\boss_victory.py`, `loops\psxsynth.py`): after any battle both versions play song 1 of the loaded music file (PS1 battle overlay / PC 0x4C5C2D). For the boss battles of Ryu's and Fou-Lu's parties that file is BGM008 or BGM016: the same victory sequence as everywhere else, but with the boss music's sound bank, whose samples differ for every instrument the victory uses. The PC recordings of those two slots are copies of the normal ones. `psxsynth.py` renders a PS1 song like the SPU (ADPCM samples and loops, ADSR, pitch from key, centre, fine tune and pitch bend, libsnd volume with channel volume squared, pan), dry; `boss_victory.py` fits per-channel balance and the recordings' tone curve on the normal version against its PC recording, applies them to the boss version, encodes it like the originals (128 kbps CBR, 44.1 kHz stereo, intro and two loop passes) and picks the loop jump where both passes match.
+- **Fast-forward** (`reverb\fps60.c`, through the present hook): the frame limiter's ms table (0x952998) is divided by
+  the speed and only every speed-th frame is presented (presents wait for the vertical blank); the others clear Z as
+  the present would. Music streams by its own clock.
 - **Widescreen** (`reverb\widescreen.c`): the game scales the PS1's 320×240 picture to the chosen resolution, so at
   16:9 everything is a third too wide. Right before each frame is drawn, the DLL squeezes it back to 4:3 proportions
   around the centre; the 3D scene then fills the sides. For that the exe draws what the PS1 left out:
