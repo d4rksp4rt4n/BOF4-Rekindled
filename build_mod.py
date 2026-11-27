@@ -52,13 +52,23 @@ OPTIONS = [  # group, id, label, description, on/off by default[, choices "id=la
      "Shows Xbox or PlayStation button symbols instead of the circled numbers 1–10 on the Key/Pad Setting "
      "screen, and in the controller's button hints (A green, B red...).", "off", "=Numbers (original)", "xbox=Xbox", "ps=PlayStation"),
 ]
+# A release without options still being tested:  py build_mod.py --without widescreen --out mod\release
+# (the options, their exe parts and DLL variants are left out; README.txt there drops their paragraphs)
+def _arg(name):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv[:-1] else None
+WITHOUT = set((_arg("--without") or "").split(",")) - {""}
+assert WITHOUT <= {o[1] for o in OPTIONS}, f"unknown option in --without: {WITHOUT}"
+LABELS = {o[1]: o[2] for o in OPTIONS}
+OPTIONS = [o for o in OPTIONS if o[1] not in WITHOUT]
+OUT = os.path.join(HERE, _arg("--out")) if _arg("--out") else OUT
 # Installer options that stand for several patch_exe parts; the others are one part of the same name.
-PARTS = {"content": ("uncut", "dengeki", "identify"), "fixes": ("stutter", "wobble", "blend")}
+PARTS ={"content": ("uncut", "dengeki", "identify"), "fixes": ("stutter", "wobble", "blend")}
 ALWAYS = ("ffwd",)          # exe parts in every patched exe (fast-forward: Home, works whenever bof4_reverb.dll is there)
 # Option ids as variant keys use them, in manifest order (a dropdown contributes its choices).
 IDS = [c.split("=")[0] for o in OPTIONS for c in (o[5:] or [o[1]]) if c[0] != "="]
 EXE_OPTS = [i for i in IDS if set(PARTS.get(i, (i,))) <= set(P.EXE_PARTS)]
-assert sorted([p for i in EXE_OPTS for p in PARTS.get(i, (i,))] + list(ALWAYS)) == sorted(P.EXE_PARTS)
+DROPPED = {p for i in WITHOUT for p in PARTS.get(i, (i,))}
+assert sorted([p for i in EXE_OPTS for p in PARTS.get(i, (i,))] + list(ALWAYS)) == sorted(set(P.EXE_PARTS) - DROPPED)
 
 # ---------------------------------------------------------------- Better Descriptions (build time only)
 # Naro's PC release (Nexus): one BPS patch per DAT file, against the English GOG files.
@@ -223,6 +233,13 @@ def main():
                     os.path.join(HERE, "installer.cs")], check=True)
     for f in ("BOF4_Uncut_EN.exe", "BOF4_Uncut_EN.ps1", "Install.bat", "Uninstall.bat"):   # pre-rename / script installers
         if os.path.exists(os.path.join(OUT, f)): os.remove(os.path.join(OUT, f))
+    if WITHOUT:                                        # README.txt without the left-out options' paragraphs
+        lines, out, skip = open(os.path.join(HERE, "mod", "README.txt"), encoding="utf-8").read().split("\n"), [], False
+        for l in lines:
+            if l.startswith("  - "): skip = any(l.startswith(f"  - {LABELS[i]}:") for i in WITHOUT)
+            elif not l.startswith("    "): skip = False
+            if not skip: out.append(l)
+        open(os.path.join(OUT, "README.txt"), "w", encoding="utf-8", newline="").write("\n".join(out))
     print(f"built {exe} ({os.path.getsize(exe) // 1024} KB, manifest {os.path.getsize(man) // 1024} KB)")
 
 if __name__ == "__main__":

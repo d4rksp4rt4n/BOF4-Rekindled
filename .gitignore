@@ -34,3 +34,4 @@ BOF4_reverb.ini
 
 # Widescreen test dumps (large, local only)
 reverb/ws_dumps/
+mod/release-*/
