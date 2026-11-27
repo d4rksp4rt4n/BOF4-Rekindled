@@ -158,6 +158,8 @@ def render(seq_n, song, vab_n, passes=2, tail=2.0, channels=None):
         b = bends.get(ch)
         if not b: return np.zeros(n)
         ts = t0 + np.arange(n) / SR
+        b = [x for x in b if x[0] >= t0]                # a new note starts unbent: bends move sounding notes only
+        if not b: return np.zeros(n)                    # (the PC recordings: new notes 6 cents below the last bend)
         times = np.array([x[0] for x in b]); vals = np.array([x[1] for x in b], float)
         idx = np.searchsorted(times, ts, side="right") - 1
         cur = np.where(idx >= 0, vals[np.clip(idx, 0, None)], 8192.0)

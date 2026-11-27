@@ -16,6 +16,9 @@ OUT = os.path.join(os.path.dirname(HERE), "build_tmp", "boss_victory")
 JSON = os.path.join(HERE, "boss_victory.json")
 SR = psxsynth.SR
 SONGS = (("BGM008", 0, 8), ("BGM016", 12, 16))     # (boss file, file with the normal recording, boss bank); song 1
+# by ear: the eastern boss bank's drum hit (channel 1, key 46) is 3.3 dB louder than the normal one, on top of the
+# boost fitted for the normal hit, and covered the brass; it plays at the normal version's level
+TWEAK = {"BGM008": {1: 0.68}}                       # channel gain multipliers
 FRAME = 1152
 
 def pc_recording(n, part):
@@ -74,7 +77,8 @@ def make(write_wav=False):
         rec = pc_recording(seq_n, 1)
         gains, curve, level = calibrate(seq_n, rec)
         ev, (ls, le, tot) = psxsynth.events(psxsynth.emi_parts(seq_n)[0x53455170], 1)
-        boss = sum(psxsynth.render(seq_n, 1, bank, channels={c})[0] * g for c, g in gains.items())
+        boss = sum(psxsynth.render(seq_n, 1, bank, channels={c})[0] * g * TWEAK.get(name, {}).get(c, 1.0)
+                   for c, g in gains.items())
         normal = sum(psxsynth.render(seq_n, 1, seq_n, channels={c})[0] * g for c, g in gains.items())
         boss, normal = apply_curve(boss, curve), apply_curve(normal, curve)
         scale = level / np.sqrt((normal[:len(rec)] ** 2).mean())    # the normal version at the recording's level
